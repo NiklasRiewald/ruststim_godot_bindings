@@ -1,0 +1,25 @@
+[package]
+name = "nphysics_godot_bindings"
+version = "0.1.0"
+authors = ["nriewald <niklas.riewald@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+Inflector  = "0.11"
+nalgebra   = "0.21"
+ncollide2d = "0.23"
+nphysics2d = "0.16"
+gdnative = "0.9.0-preview.0"
+
+[dependencies.salva2d]
+version = "0.4.0"
+features = [ "nphysics", "sampling" ]
+
+[target.wasm32-unknown-unknown.dependencies]
+stdweb = "0.4"
+
+[target.wasm32-unknown-emscripten.dependencies]
+stdweb = "0.4"
+
+[target.asmjs-unknown-emscripten.dependencies]
+stdweb = "0.4"
