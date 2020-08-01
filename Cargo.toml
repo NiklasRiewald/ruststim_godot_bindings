@@ -23,3 +23,6 @@ stdweb = "0.4"
 
 [target.asmjs-unknown-emscripten.dependencies]
 stdweb = "0.4"
+
+[lib]
+crate-type = ["cdylib"]
