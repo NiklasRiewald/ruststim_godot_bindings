@@ -94,7 +94,7 @@ impl Physics {
     fn get_polygons(&mut self, owner: &Node) -> Vector3Array {
         let mut polygons = Vector3Array::new();
         for (i, polygon) in self.colliders.iter() {
-            let position: &Isometry2<f32> = collider.position();
+            let position: &Isometry2<f32> = polygon.position();
             polygons.push(Vector3::new(position.translation.x, position.translation.y, position.rotation.angle()))
         }
         return polygons;
@@ -119,20 +119,17 @@ impl Physics {
             &mut self.force_generators,
         );
 
-        #[cfg(feature = "fluids")]
-            {
-                if let Some(fluids) = &mut self.fluids {
-                    let dt = self.mechanical_world.timestep();
-                    let gravity = &self.mechanical_world.gravity;
-                    self.liquid_world.step_with_coupling(
-                        dt,
-                        gravity,
-                        &mut fluids
-                            .coupling
-                            .as_manager_mut(&self.colliders, &mut self.bodies),
-                    );
-                }
-            }
+        if let Some(fluids) = &mut self.fluids {
+            let dt = self.mechanical_world.timestep();
+            let gravity = &self.mechanical_world.gravity;
+            self.liquid_world.step_with_coupling(
+                dt,
+                gravity,
+                &mut fluids
+                    .coupling
+                    .as_manager_mut(&self.colliders, &mut self.bodies),
+            );
+        }
     }
 }
 
