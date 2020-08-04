@@ -3,15 +3,16 @@ extern crate nalgebra as na;
 use gdnative::prelude::*;
 
 use na::{Point2, Vector2, Isometry2};
-use ncollide2d::shape::{ShapeHandle, Polyline};
+use ncollide2d::shape::{ShapeHandle, Polyline, ConvexPolygon};
 use nphysics2d::force_generator::DefaultForceGeneratorSet;
 use nphysics2d::joint::DefaultJointConstraintSet;
 use nphysics2d::object::{BodyPartHandle, ColliderDesc, DefaultBodySet, DefaultColliderSet, RigidBodyDesc, BodyStatus, DefaultColliderHandle};
 use nphysics2d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
-use salva2d::coupling::{ColliderCouplingSet};
-use salva2d::object::{Fluid};
+use salva2d::coupling::{ColliderCouplingSet, CouplingMethod};
+use salva2d::object::{Fluid, Boundary};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
+use ncollide2d::bounding_volume::HasBoundingVolume;
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -36,13 +37,13 @@ impl Physics {
             bodies: DefaultBodySet::new(),
             colliders: DefaultColliderSet::new(),
             objects: Vec::new(),
-            mechanical_world: DefaultMechanicalWorld::new(Vector2::new(0.0, -9.81)),
+            mechanical_world: DefaultMechanicalWorld::new(Vector2::new(0.0, 9.81)),
             geometrical_world: DefaultGeometricalWorld::new(),
-            liquid_world: LiquidWorld::new(IISPHSolver::<f32>::new(), 0.1, 2.0),
+            liquid_world: LiquidWorld::new(IISPHSolver::<f32>::new(), 3.0, 2.0),
             coupling_set: ColliderCouplingSet::new(),
             joint_constraints: DefaultJointConstraintSet::new(),
             force_generators: DefaultForceGeneratorSet::new(),
-            particle_rad: 0.1
+            particle_rad: 3.0
         }
     }
 
@@ -53,16 +54,28 @@ impl Physics {
             status = BodyStatus::Static;
         }
         let rb = RigidBodyDesc::new().status(status).
+            mass(10.0).
+            angular_inertia(1.0).
+            rotation(0.0).
             translation(Vector2::new(position.x, position.y)).build();
 
         let rb_handle = self.bodies.insert(rb);
 
         // Build the collider.
-        let geom = ShapeHandle::new(Self::convert_polygon(polygon));
+        let geom = ShapeHandle::new(Self::convert_polygon2(polygon));
+        let geom_sample =
+            salva2d::sampling::shape_surface_ray_sample(&*geom, self.particle_rad).unwrap();
         let co = ColliderDesc::new(geom)
+            //.margin(3.0)
             .density(1.0)
             .build(BodyPartHandle(rb_handle, 0));
-        self.colliders.insert(co);
+        let co_handle = self.colliders.insert(co);
+        let bo_handle = self.liquid_world.add_boundary(Boundary::new(Vec::new()));
+        self.coupling_set.register_coupling(
+            bo_handle,
+            co_handle,
+            CouplingMethod::StaticSampling(geom_sample),
+        );
     }
 
     #[export]
@@ -109,6 +122,14 @@ impl Physics {
         return Polyline::new(points, None);
     }
 
+    fn convert_polygon2(polygon: gdnative::core_types::Vector2Array) -> ConvexPolygon<f32> {
+        let mut points = Vec::new();
+        for point in polygon.read().iter() {
+            points.push(Point2::new(point.x, point.y));
+        }
+        return ConvexPolygon::try_from_points(&points).unwrap();
+    }
+
     #[export]
     fn _process(&mut self, owner: &Node, delta: f32) {
         self.mechanical_world.step(
@@ -119,17 +140,15 @@ impl Physics {
             &mut self.force_generators,
         );
 
-        if let Some(fluids) = &mut self.fluids {
-            let dt = self.mechanical_world.timestep();
-            let gravity = &self.mechanical_world.gravity;
-            self.liquid_world.step_with_coupling(
-                dt,
-                gravity,
-                &mut fluids
-                    .coupling
-                    .as_manager_mut(&self.colliders, &mut self.bodies),
-            );
-        }
+
+        let dt = self.mechanical_world.timestep();
+        let gravity = &self.mechanical_world.gravity;
+        self.liquid_world.step_with_coupling(
+            dt,
+            gravity,
+            &mut self.coupling_set
+                .as_manager_mut(&self.colliders, &mut self.bodies),
+        );
     }
 }
 
