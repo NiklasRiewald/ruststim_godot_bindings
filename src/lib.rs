@@ -6,13 +6,14 @@ use na::{Point2, Vector2, Isometry2};
 use ncollide2d::shape::{ShapeHandle, Polyline, ConvexPolygon};
 use nphysics2d::force_generator::DefaultForceGeneratorSet;
 use nphysics2d::joint::DefaultJointConstraintSet;
-use nphysics2d::object::{BodyPartHandle, ColliderDesc, DefaultBodySet, DefaultColliderSet, RigidBodyDesc, BodyStatus, DefaultColliderHandle};
+use nphysics2d::object::{BodyPartHandle, ColliderDesc, DefaultBodySet, DefaultColliderSet, RigidBodyDesc, BodyStatus, DefaultColliderHandle, DefaultBodyHandle};
 use nphysics2d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
 use salva2d::coupling::{ColliderCouplingSet, CouplingMethod};
 use salva2d::object::{Fluid, Boundary};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
+use nphysics2d::algebra::{Force2, ForceType};
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -27,23 +28,26 @@ struct Physics {
     joint_constraints: DefaultJointConstraintSet<f32>,
     force_generators: DefaultForceGeneratorSet<f32>,
     particle_rad: f32,
+    sim_scaling_factor: f32,
 }
 
 #[methods]
 impl Physics {
 
     fn new(_owner: &Node) -> Self {
+        let rad = 0.05;
         Physics {
             bodies: DefaultBodySet::new(),
             colliders: DefaultColliderSet::new(),
             objects: Vec::new(),
             mechanical_world: DefaultMechanicalWorld::new(Vector2::new(0.0, 9.81)),
             geometrical_world: DefaultGeometricalWorld::new(),
-            liquid_world: LiquidWorld::new(IISPHSolver::<f32>::new(), 3.0, 2.0),
+            liquid_world: LiquidWorld::new(IISPHSolver::<f32>::new(), rad, 2.0),
             coupling_set: ColliderCouplingSet::new(),
             joint_constraints: DefaultJointConstraintSet::new(),
             force_generators: DefaultForceGeneratorSet::new(),
-            particle_rad: 3.0
+            particle_rad: rad,
+            sim_scaling_factor: 0.01
         }
     }
 
@@ -57,12 +61,12 @@ impl Physics {
             mass(10.0).
             angular_inertia(1.0).
             rotation(0.0).
-            translation(Vector2::new(position.x, position.y)).build();
+            translation(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor)).build();
 
         let rb_handle = self.bodies.insert(rb);
 
         // Build the collider.
-        let geom = ShapeHandle::new(Self::convert_polygon2(polygon));
+        let geom = ShapeHandle::new(self.convert_polygon2(polygon));
         let geom_sample =
             salva2d::sampling::shape_surface_ray_sample(&*geom, self.particle_rad).unwrap();
         let co = ColliderDesc::new(geom)
@@ -79,12 +83,14 @@ impl Physics {
     }
 
     #[export]
-    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array) {
-        let mut points = Vec::new();
+    fn apply_force(&mut self, owner: &Node, force: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
+        let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.apply_force(0, &Force2::new(Vector2::new(force.x, force.y), angular_force), ForceType::Force, true);
+    }
 
-        for drop in droplets.read().iter() {
-            points.push(Point2::new(drop.x, drop.y));
-        }
+    #[export]
+    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array) {
+        let mut points = self.convert_to_points(droplets);
 
         let viscosity = ArtificialViscosity::new(0.5, 0.0);
         let mut fluid = Fluid::new(points, self.particle_rad, 1.0);
@@ -97,7 +103,7 @@ impl Physics {
         let mut droplets = Vector2Array::new();
         for (i, fluid) in  self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
-                droplets.push(gdnative::core_types::Vector2::new(droplet.x, droplet.y));
+                droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
             }
         }
         return droplets;
@@ -108,25 +114,26 @@ impl Physics {
         let mut polygons = Vector3Array::new();
         for (i, polygon) in self.colliders.iter() {
             let position: &Isometry2<f32> = polygon.position();
-            polygons.push(Vector3::new(position.translation.x, position.translation.y, position.rotation.angle()))
+            polygons.push(Vector3::new(position.translation.x / self.sim_scaling_factor, position.translation.y / self.sim_scaling_factor, position.rotation.angle()))
         }
         return polygons;
     }
 
-
-    fn convert_polygon(polygon: gdnative::core_types::Vector2Array) -> Polyline<f32> {
-        let mut points = Vec::new();
-        for point in polygon.read().iter() {
-            points.push(Point2::new(point.x, point.y));
-        }
+    fn convert_polygon(&mut self, polygon: gdnative::core_types::Vector2Array) -> Polyline<f32> {
+        let mut points = self.convert_to_points(polygon);
         return Polyline::new(points, None);
     }
 
-    fn convert_polygon2(polygon: gdnative::core_types::Vector2Array) -> ConvexPolygon<f32> {
+    fn convert_to_points(&mut self, godot_vector: gdnative::core_types::Vector2Array) -> Vec<Point2<f32>> {
         let mut points = Vec::new();
-        for point in polygon.read().iter() {
-            points.push(Point2::new(point.x, point.y));
+        for point in godot_vector.read().iter() {
+            points.push(Point2::new(point.x * self.sim_scaling_factor, point.y* self.sim_scaling_factor));
         }
+        return points;
+    }
+
+    fn convert_polygon2(&mut self, polygon: gdnative::core_types::Vector2Array) -> ConvexPolygon<f32> {
+        let mut points = self.convert_to_points(polygon);
         return ConvexPolygon::try_from_points(&points).unwrap();
     }
 
