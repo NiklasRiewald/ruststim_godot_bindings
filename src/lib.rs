@@ -100,8 +100,8 @@ impl Physics {
     #[export]
     fn get_contacting_colliders(&mut self, owner: &Node, collider_index: usize) -> Vec<usize> {
         let mut collider_indices = Vec::new();
-        for stuff in self.geometrical_world.contacts_with(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0), true).unwrap() {
-            let (handle, _, _, _, _, _) = stuff;
+        for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
+            let (handle, _) = stuff;
             let (index, generation) = handle.into_raw_parts();
             collider_indices.push(index);
         }
