@@ -35,7 +35,8 @@ struct Physics {
 impl Physics {
 
     fn new(_owner: &Node) -> Self {
-        let rad = 0.05;
+        let sim_scaling_factor = 0.02;
+        let rad = 5.0 * sim_scaling_factor;
         Physics {
             bodies: DefaultBodySet::new(),
             colliders: DefaultColliderSet::new(),
@@ -47,19 +48,19 @@ impl Physics {
             joint_constraints: DefaultJointConstraintSet::new(),
             force_generators: DefaultForceGeneratorSet::new(),
             particle_rad: rad,
-            sim_scaling_factor: 0.01
+            sim_scaling_factor,
         }
     }
 
     #[export]
-    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, is_static: bool) {
+    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, is_static: bool)-> usize{
         let mut status = BodyStatus::Dynamic;
         if is_static {
             status = BodyStatus::Static;
         }
         let rb = RigidBodyDesc::new().status(status).
-            mass(10.0).
-            angular_inertia(1.0).
+            mass(mass).
+            angular_inertia(0.0).
             rotation(0.0).
             translation(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor)).build();
 
@@ -70,7 +71,7 @@ impl Physics {
         let geom_sample =
             salva2d::sampling::shape_surface_ray_sample(&*geom, self.particle_rad).unwrap();
         let co = ColliderDesc::new(geom)
-            //.margin(3.0)
+            //.margin(0.3)
             .density(1.0)
             .build(BodyPartHandle(rb_handle, 0));
         let co_handle = self.colliders.insert(co);
@@ -78,8 +79,33 @@ impl Physics {
         self.coupling_set.register_coupling(
             bo_handle,
             co_handle,
-            CouplingMethod::StaticSampling(geom_sample),
+            CouplingMethod::DynamicContactSampling,
         );
+        let (index, generation ) = rb_handle.into_raw_parts();
+        return index;
+    }
+
+    #[export]
+    fn add_sensor_to_body(&mut self, owner: &Node, body_index: usize, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
+        let body_handle = DefaultBodyHandle::from_raw_parts(body_index, 0);
+        let sensor_geom = ShapeHandle::new(self.convert_polygon2(polygon));
+        let sensor_collider = ColliderDesc::new(sensor_geom)
+            .sensor(true)
+            .build(BodyPartHandle(body_handle, 0));
+        let collider_handle = self.colliders.insert(sensor_collider);
+        let (collider_index, generation) = collider_handle.into_raw_parts();
+        return collider_index;
+    }
+
+    #[export]
+    fn get_contacting_colliders(&mut self, owner: &Node, collider_index: usize) -> Vec<usize> {
+        let mut collider_indices = Vec::new();
+        for stuff in self.geometrical_world.contacts_with(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0), true).unwrap() {
+            let (handle, _, _, _, _, _) = stuff;
+            let (index, generation) = handle.into_raw_parts();
+            collider_indices.push(index);
+        }
+        return collider_indices;
     }
 
     #[export]
