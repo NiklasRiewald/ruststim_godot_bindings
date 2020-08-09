@@ -13,7 +13,7 @@ use salva2d::object::{Fluid, Boundary};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
-use nphysics2d::algebra::{Force2, ForceType};
+use nphysics2d::algebra::{Force2, ForceType, Velocity2};
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -53,10 +53,12 @@ impl Physics {
     }
 
     #[export]
-    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, is_static: bool)-> usize{
+    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, body_status: i32)-> usize{
         let mut status = BodyStatus::Dynamic;
-        if is_static {
+        if body_status == 1 {
             status = BodyStatus::Static;
+        } else if body_status == 2 {
+            status = BodyStatus::Kinematic;
         }
         let rb = RigidBodyDesc::new().status(status).
             mass(mass).
@@ -108,10 +110,24 @@ impl Physics {
         return collider_indices;
     }
 
+    // fn get_contacting_particles(&mut self, owner: &Node) {
+        //for fluid in self.liquid_world.fluids().iter() {
+            //for particle in fluid {
+              //  particle.f
+            //}
+            //  }
+    //}
+
     #[export]
     fn apply_force(&mut self, owner: &Node, force: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.apply_force(0, &Force2::new(Vector2::new(force.x, force.y), angular_force), ForceType::Force, true);
+    }
+
+    #[export]
+    fn set_velocity(&mut self, owner: &Node, velocity: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.set_velocity(Velocity2::new(Vector2::new(velocity.x, velocity.y), angular_force));
     }
 
     #[export]
