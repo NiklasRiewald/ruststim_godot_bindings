@@ -131,6 +131,12 @@ impl Physics {
     }
 
     #[export]
+    fn set_position(&mut self, owner: &Node, position: gdnative::core_types::Vector2, angle: f32, index: usize) {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.set_position(Isometry2::new(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor), angle));
+    }
+
+    #[export]
     fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array) {
         let mut points = self.convert_to_points(droplets);
 
