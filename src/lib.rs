@@ -53,7 +53,7 @@ impl Physics {
     }
 
     #[export]
-    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, body_status: i32)-> usize{
+    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, body_status: i32)-> usize{
         let mut status = BodyStatus::Dynamic;
         if body_status == 1 {
             status = BodyStatus::Static;
@@ -74,7 +74,7 @@ impl Physics {
             salva2d::sampling::shape_surface_ray_sample(&*geom, self.particle_rad).unwrap();
         let co = ColliderDesc::new(geom)
             //.margin(0.3)
-            .density(1.0)
+            .density(density)
             .build(BodyPartHandle(rb_handle, 0));
         let co_handle = self.colliders.insert(co);
         let bo_handle = self.liquid_world.add_boundary(Boundary::new(Vec::new()));
@@ -134,6 +134,12 @@ impl Physics {
     fn set_position(&mut self, owner: &Node, position: gdnative::core_types::Vector2, angle: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_position(Isometry2::new(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor), angle));
+    }
+
+    #[export]
+    fn change_mass(&mut self, owner: &Node, mass: f32, index: usize) {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.set_mass(mass);
     }
 
     #[export]
