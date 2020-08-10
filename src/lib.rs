@@ -132,6 +132,12 @@ impl Physics {
     }
 
     #[export]
+    fn get_velocity(&mut self, owner: &Node, index: usize) -> gdnative::core_types::Vector2 {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        return gdnative::core_types::Vector2::new(body.velocity().linear.x, body.velocity().linear.y);
+    }
+
+    #[export]
     fn get_angular_velocity(&mut self, owner: &Node, index: usize) -> f32 {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         return body.velocity().angular;
