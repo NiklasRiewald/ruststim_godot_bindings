@@ -144,6 +144,12 @@ impl Physics {
     }
 
     #[export]
+    fn set_angular_inertia(&mut self, owner: &Node, angular_inertia: f32, index: usize) {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.set_angular_inertia(angular_inertia);
+    }
+
+    #[export]
     fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array) {
         let mut points = self.convert_to_points(droplets);
 
