@@ -13,6 +13,7 @@ use salva2d::object::{Fluid, Boundary};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
+use ncollide2d::query::PointQuery;
 use nphysics2d::algebra::{Force2, ForceType, Velocity2};
 
 #[derive(NativeClass)]
@@ -137,7 +138,7 @@ impl Physics {
     }
 
     #[export]
-    fn change_mass(&mut self, owner: &Node, mass: f32, index: usize) {
+    fn set_mass(&mut self, owner: &Node, mass: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_mass(mass);
     }
@@ -158,6 +159,23 @@ impl Physics {
         for (i, fluid) in  self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
+            }
+        }
+        return droplets;
+    }
+
+    #[export]
+    fn get_contacting_liquids(&mut self, owner: &Node, collider_index: usize) -> Vector2Array  {
+        let mut droplets = Vector2Array::new();
+        let mut collider = self.colliders.get(DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
+        let mut shape = collider.shape();
+        let isometry = collider.position();
+
+        for (i, fluid) in  self.liquid_world.fluids().iter() {
+            for droplet in &fluid.positions {
+                if shape.contains_point(isometry, droplet) {
+                    droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
+                }
             }
         }
         return droplets;
