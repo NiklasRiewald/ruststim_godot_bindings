@@ -65,6 +65,7 @@ impl Physics {
             mass(mass).
             angular_inertia(0.0).
             rotation(0.0).
+            local_center_of_mass(Point2::new(0.0, 0.0)).
             translation(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor)).build();
 
         let rb_handle = self.bodies.insert(rb);
@@ -153,6 +154,12 @@ impl Physics {
     fn set_mass(&mut self, owner: &Node, mass: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_mass(mass);
+    }
+
+    #[export]
+    fn set_angular_damping(&mut self, owner: &Node, angular_damping: f32, index: usize) {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.set_angular_damping(angular_damping);
     }
 
     #[export]
