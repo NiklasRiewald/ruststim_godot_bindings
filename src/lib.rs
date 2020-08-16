@@ -90,6 +90,18 @@ impl Physics {
     }
 
     #[export]
+    fn deactivate_rigid_body(&mut self, owner: &Node, index: usize) {
+        let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.deactivate();
+    }
+
+    #[export]
+    fn activate_rigid_body(&mut self, owner: &Node, index: usize) {
+        let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        body.activate();
+    }
+
+    #[export]
     fn add_sensor_to_body(&mut self, owner: &Node, body_index: usize, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
         let body_handle = DefaultBodyHandle::from_raw_parts(body_index, 0);
         let sensor_geom = ShapeHandle::new(self.convert_polygon2(polygon));
