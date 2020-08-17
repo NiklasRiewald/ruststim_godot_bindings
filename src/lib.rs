@@ -93,12 +93,14 @@ impl Physics {
     fn deactivate_rigid_body(&mut self, owner: &Node, index: usize) {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.deactivate();
+        body.set_status(BodyStatus::Disabled);
     }
 
     #[export]
     fn activate_rigid_body(&mut self, owner: &Node, index: usize) {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.activate();
+        body.set_status(BodyStatus::Dynamic);
     }
 
     #[export]
@@ -117,9 +119,11 @@ impl Physics {
     fn get_contacting_colliders(&mut self, owner: &Node, collider_index: usize) -> Vec<usize> {
         let mut collider_indices = Vec::new();
         for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
-            let (handle, _) = stuff;
-            let (index, generation) = handle.into_raw_parts();
-            collider_indices.push(index);
+            let (handle, collider) = stuff;
+            if self.bodies.get_mut(collider.body()).unwrap().status() != BodyStatus::Disabled {
+                let (index, generation) = handle.into_raw_parts();
+                collider_indices.push(index);
+            }
         }
         return collider_indices;
     }
@@ -160,6 +164,18 @@ impl Physics {
     fn set_position(&mut self, owner: &Node, position: gdnative::core_types::Vector2, angle: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_position(Isometry2::new(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor), angle));
+    }
+
+    #[export]
+    fn get_position(&mut self, owner: &Node, index: usize) -> gdnative::core_types::Vector2 {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        return gdnative::core_types::Vector2::new(body.position().translation.x / self.sim_scaling_factor, body.position().translation.y / self.sim_scaling_factor);
+    }
+
+    #[export]
+    fn get_rotation(&mut self, owner: &Node, index: usize) -> f32 {
+        let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
+        return body.position().rotation.angle();
     }
 
     #[export]
