@@ -9,7 +9,7 @@ use nphysics2d::joint::DefaultJointConstraintSet;
 use nphysics2d::object::{BodyPartHandle, ColliderDesc, DefaultBodySet, DefaultColliderSet, RigidBodyDesc, BodyStatus, DefaultColliderHandle, DefaultBodyHandle};
 use nphysics2d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
 use salva2d::coupling::{ColliderCouplingSet, CouplingMethod};
-use salva2d::object::{Fluid, Boundary};
+use salva2d::object::{Fluid, Boundary, BoundaryHandle};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
@@ -101,6 +101,20 @@ impl Physics {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.activate();
         body.set_status(BodyStatus::Dynamic);
+    }
+
+    #[export]
+    fn deactivate_liquid_coupling(&mut self, owner: &Node, collider_index: usize) {
+        self.coupling_set.unregister_coupling(DefaultColliderHandle::from_raw_parts(collider_index, 0));
+    }
+
+    fn activate_liquid_coupling(&mut self, owner: &Node, collider_index: usize) {
+        let bo_handle = self.liquid_world.add_boundary(Boundary::new(Vec::new()));
+        self.coupling_set.register_coupling(
+            bo_handle,
+            DefaultBodyHandle::from_raw_parts(collider_index, 0),
+            CouplingMethod::DynamicContactSampling,
+        );
     }
 
     #[export]
