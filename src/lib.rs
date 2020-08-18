@@ -54,7 +54,7 @@ impl Physics {
     }
 
     #[export]
-    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, body_status: i32)-> usize{
+    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, body_status: i32) -> Vec<usize> {
         let mut status = BodyStatus::Dynamic;
         if body_status == 1 {
             status = BodyStatus::Static;
@@ -86,7 +86,11 @@ impl Physics {
             CouplingMethod::DynamicContactSampling,
         );
         let (index, generation ) = rb_handle.into_raw_parts();
-        return index;
+        let (collider_index, collider_generation ) = co_handle.into_raw_parts();
+        let mut indices = Vec::new();
+        indices.push(index);
+        indices.push(collider_index);
+        return indices;
     }
 
     #[export]
@@ -105,9 +109,11 @@ impl Physics {
 
     #[export]
     fn deactivate_liquid_coupling(&mut self, owner: &Node, collider_index: usize) {
-        self.coupling_set.unregister_coupling(DefaultColliderHandle::from_raw_parts(collider_index, 0));
+        let boundary_handle = self.coupling_set.unregister_coupling(DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
+        self.liquid_world.remove_boundary(boundary_handle);
     }
 
+    #[export]
     fn activate_liquid_coupling(&mut self, owner: &Node, collider_index: usize) {
         let bo_handle = self.liquid_world.add_boundary(Boundary::new(Vec::new()));
         self.coupling_set.register_coupling(
