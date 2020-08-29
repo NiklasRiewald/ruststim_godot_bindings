@@ -140,7 +140,7 @@ impl Physics {
         let mut collider_indices = Vec::new();
         for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
             let (handle, collider) = stuff;
-            if self.bodies.get_mut(collider.body()).unwrap().status() != BodyStatus::Disabled {
+            if self.bodies.get_mut(collider.body()).unwrap().status() != BodyStatus::Disabled && !collider.is_sensor() {
                 let (index, generation) = handle.into_raw_parts();
                 collider_indices.push(index);
             }
