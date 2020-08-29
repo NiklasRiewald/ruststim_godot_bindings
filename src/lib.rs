@@ -136,6 +136,25 @@ impl Physics {
     }
 
     #[export]
+    fn add_sensor(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
+        let rb = RigidBodyDesc::new().status(BodyStatus::Kinematic).
+            mass(1.0).
+            angular_inertia(0.0).
+            rotation(0.0).
+            local_center_of_mass(Point2::new(0.0, 0.0)).
+            translation(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor)).build();
+
+        let body_handle = self.bodies.insert(rb);
+        let sensor_geom = ShapeHandle::new(self.convert_polygon2(polygon));
+        let sensor_collider = ColliderDesc::new(sensor_geom)
+            .sensor(true)
+            .build(BodyPartHandle(body_handle, 0));
+        let collider_handle = self.colliders.insert(sensor_collider);
+        let (collider_index, generation) = collider_handle.into_raw_parts();
+        return collider_index;
+    }
+
+    #[export]
     fn get_contacting_colliders(&mut self, owner: &Node, collider_index: usize) -> Vec<usize> {
         let mut collider_indices = Vec::new();
         for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
