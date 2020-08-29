@@ -236,13 +236,22 @@ impl Physics {
     }
 
     #[export]
-    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array) {
+    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) {
         let mut points = self.convert_to_points(droplets);
 
         let viscosity = ArtificialViscosity::new(0.5, 0.0);
         let mut fluid = Fluid::new(points, self.particle_rad, 1.0);
+        fluid.velocities = self.convert_to_vec_of_vectors(velocities);
         fluid.nonpressure_forces.push(Box::new(viscosity.clone()));
         self.liquid_world.add_fluid(fluid);
+    }
+
+    fn convert_to_vec_of_vectors(&mut self, vector: gdnative::core_types::Vector2Array) -> Vec<Vector2<f32>> {
+        let mut rust_vec = Vec::new();
+        for value in vector.read().iter() {
+            rust_vec.push(Vector2::new(value.x, value.y));
+        }
+        return rust_vec;
     }
 
     #[export]
