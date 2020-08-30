@@ -9,7 +9,7 @@ use nphysics2d::joint::DefaultJointConstraintSet;
 use nphysics2d::object::{BodyPartHandle, ColliderDesc, DefaultBodySet, DefaultColliderSet, RigidBodyDesc, BodyStatus, DefaultColliderHandle, DefaultBodyHandle};
 use nphysics2d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
 use salva2d::coupling::{ColliderCouplingSet, CouplingMethod};
-use salva2d::object::{Fluid, Boundary, BoundaryHandle};
+use salva2d::object::{Fluid, Boundary, BoundaryHandle, FluidHandle, ContiguousArenaIndex};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
@@ -236,14 +236,17 @@ impl Physics {
     }
 
     #[export]
-    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) {
+    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) -> usize {
         let mut points = self.convert_to_points(droplets);
 
         let viscosity = ArtificialViscosity::new(0.5, 0.0);
         let mut fluid = Fluid::new(points, self.particle_rad, 1.0);
         fluid.velocities = self.convert_to_vec_of_vectors(velocities);
         fluid.nonpressure_forces.push(Box::new(viscosity.clone()));
-        self.liquid_world.add_fluid(fluid);
+        let fluid_handle : FluidHandle = self.liquid_world.add_fluid(fluid);
+        let idx: ContiguousArenaIndex =fluid_handle.into();
+        let (fluid_index, generation ) = idx.into_raw_parts();
+        return fluid_index;
     }
 
     fn convert_to_vec_of_vectors(&mut self, vector: gdnative::core_types::Vector2Array) -> Vec<Vector2<f32>> {
@@ -257,12 +260,27 @@ impl Physics {
     #[export]
     fn get_liquid(&mut self, owner: &Node) -> Vector2Array {
         let mut droplets = Vector2Array::new();
-        for (i, fluid) in  self.liquid_world.fluids().iter() {
+        for (i, fluid) in self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
             }
         }
         return droplets;
+    }
+
+    #[export]
+    fn get_liquid_velocities(&mut self, owner: &Node, liquid_index: usize) -> Vector2Array {
+        let mut droplets = Vector2Array::new();
+        for droplet in &self.get_liquid_by_index(liquid_index).velocities {
+            droplets.push(gdnative::core_types::Vector2::new(droplet.x, droplet.y));
+        }
+        return droplets;
+    }
+
+    fn get_liquid_by_index(&mut self, liquid_index: usize) -> &Fluid<f32> {
+        let index = ContiguousArenaIndex::from_raw_parts(liquid_index, 0);
+        let fluid_handle = FluidHandle::from(index);
+        return self.liquid_world.fluids().get(fluid_handle).unwrap();
     }
 
     #[export]
