@@ -283,6 +283,17 @@ impl Physics {
         return droplets;
     }
 
+    #[export]
+    fn get_all_liquid_velocities(&mut self, owner: &Node) -> Vector2Array {
+        let mut velocities = Vector2Array::new();
+        for (i, fluid) in self.liquid_world.fluids().iter() {
+            for velocity in &fluid.velocities {
+                velocities.push(gdnative::core_types::Vector2::new(velocity.x / self.sim_scaling_factor, velocity.y / self.sim_scaling_factor));
+            }
+        }
+        return velocities;
+    }
+
     fn get_liquid_by_index(&mut self, liquid_index: gdnative::core_types::Vector2) -> &Fluid<f32> {
         let fluid_handle = self.get_liquid_handle(liquid_index);
         return self.liquid_world.fluids().get(fluid_handle).unwrap();
