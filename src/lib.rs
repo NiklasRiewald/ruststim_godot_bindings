@@ -236,7 +236,7 @@ impl Physics {
     }
 
     #[export]
-    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) -> usize {
+    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) -> gdnative::core_types::Vector2 {
         let mut points = self.convert_to_points(droplets);
 
         let viscosity = ArtificialViscosity::new(0.5, 0.0);
@@ -246,11 +246,11 @@ impl Physics {
         let fluid_handle : FluidHandle = self.liquid_world.add_fluid(fluid);
         let idx: ContiguousArenaIndex =fluid_handle.into();
         let (fluid_index, generation ) = idx.into_raw_parts();
-        return fluid_index;
+        return gdnative::core_types::Vector2::new(fluid_index as f32, generation as f32);
     }
 
     #[export]
-    fn remove_liquid(&mut self, owner: &Node, liquid_index: usize) {
+    fn remove_liquid(&mut self, owner: &Node, liquid_index: gdnative::core_types::Vector2) {
         let fluid_handle = self.get_liquid_handle(liquid_index);
         self.liquid_world.remove_fluid(fluid_handle);
     }
@@ -275,7 +275,7 @@ impl Physics {
     }
 
     #[export]
-    fn get_liquid_velocities(&mut self, owner: &Node, liquid_index: usize) -> Vector2Array {
+    fn get_liquid_velocities(&mut self, owner: &Node, liquid_index: gdnative::core_types::Vector2) -> Vector2Array {
         let mut droplets = Vector2Array::new();
         for droplet in &self.get_liquid_by_index(liquid_index).velocities {
             droplets.push(gdnative::core_types::Vector2::new(droplet.x, droplet.y));
@@ -283,13 +283,13 @@ impl Physics {
         return droplets;
     }
 
-    fn get_liquid_by_index(&mut self, liquid_index: usize) -> &Fluid<f32> {
+    fn get_liquid_by_index(&mut self, liquid_index: gdnative::core_types::Vector2) -> &Fluid<f32> {
         let fluid_handle = self.get_liquid_handle(liquid_index);
         return self.liquid_world.fluids().get(fluid_handle).unwrap();
     }
 
-    fn get_liquid_handle(&mut self, liquid_index: usize) -> FluidHandle {
-        let index = ContiguousArenaIndex::from_raw_parts(liquid_index, 0);
+    fn get_liquid_handle(&mut self, liquid_index: gdnative::core_types::Vector2) -> FluidHandle {
+        let index = ContiguousArenaIndex::from_raw_parts(liquid_index.x as usize, liquid_index.y as u64);
         return FluidHandle::from(index);
     }
 
