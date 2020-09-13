@@ -9,7 +9,7 @@ use nphysics2d::joint::DefaultJointConstraintSet;
 use nphysics2d::object::{BodyPartHandle, ColliderDesc, DefaultBodySet, DefaultColliderSet, RigidBodyDesc, BodyStatus, DefaultColliderHandle, DefaultBodyHandle};
 use nphysics2d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
 use salva2d::coupling::{ColliderCouplingSet, CouplingMethod};
-use salva2d::object::{Fluid, Boundary, BoundaryHandle, FluidHandle, ContiguousArenaIndex};
+use salva2d::object::{Fluid, Boundary, BoundaryHandle, FluidHandle, ContiguousArenaIndex, FluidSet};
 use salva2d::solver::{ArtificialViscosity, IISPHSolver};
 use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
@@ -249,6 +249,12 @@ impl Physics {
         return fluid_index;
     }
 
+    #[export]
+    fn remove_liquid(&mut self, owner: &Node, liquid_index: usize) {
+        let fluid_handle = self.get_liquid_handle(liquid_index);
+        self.liquid_world.remove_fluid(fluid_handle);
+    }
+
     fn convert_to_vec_of_vectors(&mut self, vector: gdnative::core_types::Vector2Array) -> Vec<Vector2<f32>> {
         let mut rust_vec = Vec::new();
         for value in vector.read().iter() {
@@ -278,9 +284,13 @@ impl Physics {
     }
 
     fn get_liquid_by_index(&mut self, liquid_index: usize) -> &Fluid<f32> {
-        let index = ContiguousArenaIndex::from_raw_parts(liquid_index, 0);
-        let fluid_handle = FluidHandle::from(index);
+        let fluid_handle = self.get_liquid_handle(liquid_index);
         return self.liquid_world.fluids().get(fluid_handle).unwrap();
+    }
+
+    fn get_liquid_handle(&mut self, liquid_index: usize) -> FluidHandle {
+        let index = ContiguousArenaIndex::from_raw_parts(liquid_index, 0);
+        return FluidHandle::from(index);
     }
 
     #[export]
