@@ -15,6 +15,8 @@ use salva2d::LiquidWorld;
 use ncollide2d::bounding_volume::HasBoundingVolume;
 use ncollide2d::query::PointQuery;
 use nphysics2d::algebra::{Force2, ForceType, Velocity2};
+use contour::ContourBuilder;
+use geojson::Value;
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -34,7 +36,6 @@ struct Physics {
 
 #[methods]
 impl Physics {
-
     fn new(_owner: &Node) -> Self {
         let sim_scaling_factor = 0.02;
         let rad = 5.0 * sim_scaling_factor;
@@ -85,8 +86,8 @@ impl Physics {
             co_handle,
             CouplingMethod::DynamicContactSampling,
         );
-        let (index, generation ) = rb_handle.into_raw_parts();
-        let (collider_index, collider_generation ) = co_handle.into_raw_parts();
+        let (index, generation) = rb_handle.into_raw_parts();
+        let (collider_index, collider_generation) = co_handle.into_raw_parts();
         let mut indices = Vec::new();
         indices.push(index);
         indices.push(collider_index);
@@ -157,7 +158,7 @@ impl Physics {
     #[export]
     fn get_contacting_colliders(&mut self, owner: &Node, collider_index: usize) -> Vec<usize> {
         let mut collider_indices = Vec::new();
-        for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders,DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
+        for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders, DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
             let (handle, collider) = stuff;
             if self.bodies.get_mut(collider.body()).unwrap().status() != BodyStatus::Disabled && !collider.is_sensor() {
                 let (index, generation) = handle.into_raw_parts();
@@ -168,11 +169,11 @@ impl Physics {
     }
 
     // fn get_contacting_particles(&mut self, owner: &Node) {
-        //for fluid in self.liquid_world.fluids().iter() {
-            //for particle in fluid {
-              //  particle.f
-            //}
-            //  }
+    //for fluid in self.liquid_world.fluids().iter() {
+    //for particle in fluid {
+    //  particle.f
+    //}
+    //  }
     //}
 
     #[export]
@@ -249,9 +250,9 @@ impl Physics {
         let mut fluid = Fluid::new(points, self.particle_rad, 1.0);
         fluid.velocities = self.convert_to_vec_of_vectors(velocities);
         fluid.nonpressure_forces.push(Box::new(viscosity.clone()));
-        let fluid_handle : FluidHandle = self.liquid_world.add_fluid(fluid);
-        let idx: ContiguousArenaIndex =fluid_handle.into();
-        let (fluid_index, generation ) = idx.into_raw_parts();
+        let fluid_handle: FluidHandle = self.liquid_world.add_fluid(fluid);
+        let idx: ContiguousArenaIndex = fluid_handle.into();
+        let (fluid_index, generation) = idx.into_raw_parts();
         return gdnative::core_types::Vector2::new(fluid_index as f32, generation as f32);
     }
 
@@ -278,6 +279,77 @@ impl Physics {
             }
         }
         return droplets;
+    }
+
+    #[export]
+    fn get_liquid_as_polygons(&mut self, owner: &Node) -> Vec<Vector2Array> {
+        //let droplets = self.get_liquid(owner);
+
+        let res = 0.2;
+
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX;
+        let mut max_y = f32::MIN;
+
+
+        for (i, fluid) in self.liquid_world.fluids().iter() {
+            for droplet in &fluid.positions {
+                if droplet.x <= min_x {
+                    min_x = droplet.x;
+                } else if droplet.x >= max_x {
+                    max_x = droplet.x;
+                }
+
+                if droplet.y <= min_y {
+                    min_y = droplet.y;
+                } else if droplet.y >= max_y {
+                    max_y = droplet.y;
+                }
+            }
+        }
+
+        let x_length = ((max_x - min_x) / res).ceil();
+        let y_length = ((max_y - min_y) / res).ceil();
+
+        let c = ContourBuilder::new(
+            x_length as u32,
+            y_length as u32,
+            false,
+        );
+        let number_of_elements = x_length * y_length;
+        let mut field = vec![0.0; number_of_elements as usize];
+
+        for (i, fluid) in self.liquid_world.fluids().iter() {
+            for droplet in &fluid.positions {
+                field[(((droplet.x - min_x) / res).floor() + ((droplet.y - min_y) / res).floor() * x_length) as usize] = 1.0;
+            }
+        }
+
+        let polygons = c.contours(&field, &[0.5]);
+        let mut result = Vec::new();
+        for feature in polygons.unwrap() {
+            let multi_poly = feature.geometry.unwrap().value;
+            match multi_poly {
+                Value::MultiPolygon(ref collection) =>
+                    for fake_poly in collection {
+                        for poly in fake_poly {
+                            let mut poly_result = Vector2Array::new();
+                            for point in poly {
+                                poly_result.push(
+                                    gdnative::core_types::Vector2::new(
+                                        (point[0] as f32 * res + min_x)  / self.sim_scaling_factor,
+                                        (point[1] as f32 * res + min_y) / self.sim_scaling_factor
+                                    )
+                                );
+                            }
+                            result.push(poly_result);
+                        }
+                    }
+                _ => println!("accidents happen"),
+            }
+        }
+        return result;
     }
 
     #[export]
@@ -311,13 +383,13 @@ impl Physics {
     }
 
     #[export]
-    fn get_contacting_liquids(&mut self, owner: &Node, collider_index: usize) -> Vector2Array  {
+    fn get_contacting_liquids(&mut self, owner: &Node, collider_index: usize) -> Vector2Array {
         let mut droplets = Vector2Array::new();
         let mut collider = self.colliders.get(DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
         let mut shape = collider.shape();
         let isometry = collider.position();
 
-        for (i, fluid) in  self.liquid_world.fluids().iter() {
+        for (i, fluid) in self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 if shape.contains_point(isometry, droplet) {
                     droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
@@ -345,7 +417,7 @@ impl Physics {
     fn convert_to_points(&mut self, godot_vector: gdnative::core_types::Vector2Array) -> Vec<Point2<f32>> {
         let mut points = Vec::new();
         for point in godot_vector.read().iter() {
-            points.push(Point2::new(point.x * self.sim_scaling_factor, point.y* self.sim_scaling_factor));
+            points.push(Point2::new(point.x * self.sim_scaling_factor, point.y * self.sim_scaling_factor));
         }
         return points;
     }

@@ -10,6 +10,8 @@ nalgebra   = "0.21"
 ncollide2d = "0.23"
 nphysics2d = "0.16"
 gdnative = "0.9.0-preview.0"
+contour = "0.2.0"
+geojson = "0.19.0"
 
 [dependencies.salva2d]
 version = "0.4.0"
