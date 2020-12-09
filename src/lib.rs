@@ -282,6 +282,35 @@ impl Physics {
     }
 
     #[export]
+    fn get_liquid_raster(&mut self, owner: &Node, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32) -> Ref<gdnative::api::Image, Unique> {
+        let mut image = gdnative::api::Image::new();
+        let rgba8 = 5;
+        image.create(((x_max - x_min) / resolution + 1.0).ceil() as i64, ((y_max - y_min) / resolution + 1.0).ceil() as i64, false, rgba8);
+        image.lock();
+        image.fill(gdnative::core_types::Color::rgba(0., 0.0, 0.0, 0.0));
+        image.unlock();
+        let scaled_x_min = x_min * self.sim_scaling_factor;
+        let scaled_x_max = x_max * self.sim_scaling_factor;
+        let scaled_y_min = y_min * self.sim_scaling_factor;
+        let scaled_y_max = y_max * self.sim_scaling_factor;
+        image.lock();
+        for (i, fluid) in self.liquid_world.fluids().iter() {
+            for droplet in &fluid.positions {
+                if droplet.x >= scaled_x_min && droplet.x <= scaled_x_max && droplet.y >= scaled_y_min && droplet.y <= scaled_y_max {
+                    image.set_pixel(
+                        ((droplet.x / self.sim_scaling_factor - x_min) / resolution).round() as i64,
+                        ((droplet.y / self.sim_scaling_factor - y_min) / resolution).round() as i64,
+                        gdnative::core_types::Color::rgba(0., 0.1, 0.8, 1.)
+                    );
+                }
+            }
+        }
+
+        image.unlock();
+        return image;
+    }
+
+    #[export]
     fn get_liquid_as_polygons(&mut self, owner: &Node) -> Vec<Vector2Array> {
         //let droplets = self.get_liquid(owner);
 
