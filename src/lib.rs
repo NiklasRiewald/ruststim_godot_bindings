@@ -18,6 +18,7 @@ use nphysics2d::algebra::{Force2, ForceType, Velocity2};
 use contour::ContourBuilder;
 use geojson::Value;
 use std::cmp;
+use nphysics2d::material::{MaterialHandle, BasicMaterial};
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -56,7 +57,7 @@ impl Physics {
     }
 
     #[export]
-    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, body_status: i32) -> Vec<usize> {
+    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, restitution: f32, friction: f32, body_status: i32) -> Vec<usize> {
         let mut status = BodyStatus::Dynamic;
         if body_status == 1 {
             status = BodyStatus::Static;
@@ -79,6 +80,7 @@ impl Physics {
         let co = ColliderDesc::new(geom)
             //.margin(0.3)
             .density(density)
+            .material(MaterialHandle::new(BasicMaterial::new(restitution, friction)))
             .build(BodyPartHandle(rb_handle, 0));
         let co_handle = self.colliders.insert(co);
         let bo_handle = self.liquid_world.add_boundary(Boundary::new(Vec::new()));
