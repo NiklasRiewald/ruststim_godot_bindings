@@ -17,6 +17,7 @@ use ncollide2d::query::PointQuery;
 use nphysics2d::algebra::{Force2, ForceType, Velocity2};
 use contour::ContourBuilder;
 use geojson::Value;
+use std::cmp;
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -282,10 +283,15 @@ impl Physics {
     }
 
     #[export]
-    fn get_liquid_raster(&mut self, owner: &Node, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32) -> Ref<gdnative::api::Image, Unique> {
-        let mut image = gdnative::api::Image::new();
+    fn get_liquid_raster(&mut self, owner: &Node, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32, meta_ball_influence: i64) -> Ref<gdnative::api::Image, Unique> {
+
         let rgba8 = 5;
-        image.create(((x_max - x_min) / resolution + 1.0).ceil() as i64, ((y_max - y_min) / resolution + 1.0).ceil() as i64, false, rgba8);
+        let width = ((x_max - x_min) / resolution + 1.0).ceil() as i64;
+        let height = ((y_max - y_min) / resolution + 1.0).ceil() as i64;
+        let mut data = vec![vec![0.0f32; height as usize]; width as usize];
+
+        let mut image = gdnative::api::Image::new();
+        image.create(width, height, false, rgba8);
         image.lock();
         image.fill(gdnative::core_types::Color::rgba(0., 0.0, 0.0, 0.0));
         image.unlock();
@@ -293,16 +299,37 @@ impl Physics {
         let scaled_x_max = x_max * self.sim_scaling_factor;
         let scaled_y_min = y_min * self.sim_scaling_factor;
         let scaled_y_max = y_max * self.sim_scaling_factor;
-        image.lock();
+
         for (i, fluid) in self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 if droplet.x >= scaled_x_min && droplet.x <= scaled_x_max && droplet.y >= scaled_y_min && droplet.y <= scaled_y_max {
-                    image.set_pixel(
-                        ((droplet.x / self.sim_scaling_factor - x_min) / resolution).round() as i64,
-                        ((droplet.y / self.sim_scaling_factor - y_min) / resolution).round() as i64,
-                        gdnative::core_types::Color::rgba(0., 0.1, 0.8, 1.)
-                    );
+                    let true_x = (droplet.x / self.sim_scaling_factor - x_min) / resolution;
+                    let x = true_x.round() as i64;
+                    let x_start = cmp::max(0, x - meta_ball_influence);
+                    let x_end = cmp::min(width, x + meta_ball_influence);
+
+                    let true_y = ((droplet.y / self.sim_scaling_factor - y_min) / resolution);
+                    let y = true_y.round() as i64;
+                    let y_start = cmp::max(0, y - meta_ball_influence);
+                    let y_end = cmp::min(height, y + meta_ball_influence);
+
+                    for x_i in x_start..x_end {
+                        for y_i in y_start..y_end {
+                            data[x_i as usize][y_i as usize] += 1. / ((true_x - x_i as f32).powf(2.0) + (true_y - y_i as f32).powf(2.0));
+                        }
+                    }
                 }
+            }
+        }
+
+        image.lock();
+        for x_i in 0..width {
+            for y_i in 0..height {
+                image.set_pixel(
+                    x_i,
+                    y_i,
+                    gdnative::core_types::Color::rgba(0., 0.1, 0.8, data[x_i as usize][y_i as usize]),
+                );
             }
         }
 
@@ -367,8 +394,8 @@ impl Physics {
                             for point in poly {
                                 poly_result.push(
                                     gdnative::core_types::Vector2::new(
-                                        (point[0] as f32 * res + min_x)  / self.sim_scaling_factor,
-                                        (point[1] as f32 * res + min_y) / self.sim_scaling_factor
+                                        (point[0] as f32 * res + min_x) / self.sim_scaling_factor,
+                                        (point[1] as f32 * res + min_y) / self.sim_scaling_factor,
                                     )
                                 );
                             }
