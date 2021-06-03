@@ -2,7 +2,7 @@ extern crate nalgebra as na;
 
 use gdnative::prelude::*;
 
-use na::{Point2, Vector2, Isometry2};
+use na::{Point2, Vector2, Isometry2, Point};
 use ncollide2d::shape::{ShapeHandle, Polyline, ConvexPolygon};
 use nphysics2d::force_generator::DefaultForceGeneratorSet;
 use nphysics2d::joint::DefaultJointConstraintSet;
@@ -19,6 +19,13 @@ use contour::ContourBuilder;
 use geojson::Value;
 use std::cmp;
 use nphysics2d::material::{MaterialHandle, BasicMaterial};
+use std::convert::TryInto;
+
+
+mod conversion;
+
+
+const SIM_SCALING_FACTOR: f32 = 0.02;
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -32,15 +39,13 @@ struct Physics {
     coupling_set: ColliderCouplingSet<f32, DefaultColliderHandle>,
     joint_constraints: DefaultJointConstraintSet<f32>,
     force_generators: DefaultForceGeneratorSet<f32>,
-    particle_rad: f32,
-    sim_scaling_factor: f32,
+    particle_rad: f32
 }
 
 #[methods]
 impl Physics {
     fn new(_owner: &Node) -> Self {
-        let sim_scaling_factor = 0.02;
-        let rad = 5.0 * sim_scaling_factor;
+        let rad = 5.0 * SIM_SCALING_FACTOR;
         Physics {
             bodies: DefaultBodySet::new(),
             colliders: DefaultColliderSet::new(),
@@ -52,12 +57,11 @@ impl Physics {
             joint_constraints: DefaultJointConstraintSet::new(),
             force_generators: DefaultForceGeneratorSet::new(),
             particle_rad: rad,
-            sim_scaling_factor,
         }
     }
 
     #[export]
-    fn add_rigid_body(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, restitution: f32, friction: f32, body_status: i32) -> Vec<usize> {
+    fn add_rigid_body(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, restitution: f32, friction: f32, body_status: i32) -> Vec<usize> {
         let mut status = BodyStatus::Dynamic;
         if body_status == 1 {
             status = BodyStatus::Static;
@@ -69,7 +73,7 @@ impl Physics {
             angular_inertia(0.0).
             rotation(0.0).
             local_center_of_mass(Point2::new(0.0, 0.0)).
-            translation(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor)).build();
+            translation(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR)).build();
 
         let rb_handle = self.bodies.insert(rb);
 
@@ -98,27 +102,27 @@ impl Physics {
     }
 
     #[export]
-    fn deactivate_rigid_body(&mut self, owner: &Node, index: usize) {
+    fn deactivate_rigid_body(&mut self, _owner: &Node, index: usize) {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.deactivate();
         body.set_status(BodyStatus::Disabled);
     }
 
     #[export]
-    fn activate_rigid_body(&mut self, owner: &Node, index: usize) {
+    fn activate_rigid_body(&mut self, _owner: &Node, index: usize) {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.activate();
         body.set_status(BodyStatus::Dynamic);
     }
 
     #[export]
-    fn deactivate_liquid_coupling(&mut self, owner: &Node, collider_index: usize) {
+    fn deactivate_liquid_coupling(&mut self, _owner: &Node, collider_index: usize) {
         let boundary_handle = self.coupling_set.unregister_coupling(DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
         self.liquid_world.remove_boundary(boundary_handle);
     }
 
     #[export]
-    fn activate_liquid_coupling(&mut self, owner: &Node, collider_index: usize) {
+    fn activate_liquid_coupling(&mut self, _owner: &Node, collider_index: usize) {
         let bo_handle = self.liquid_world.add_boundary(Boundary::new(Vec::new()));
         self.coupling_set.register_coupling(
             bo_handle,
@@ -128,7 +132,7 @@ impl Physics {
     }
 
     #[export]
-    fn add_sensor_to_body(&mut self, owner: &Node, body_index: usize, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
+    fn add_sensor_to_body(&mut self, _owner: &Node, body_index: usize, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
         let body_handle = DefaultBodyHandle::from_raw_parts(body_index, 0);
         let sensor_geom = ShapeHandle::new(self.convert_polygon2(polygon));
         let sensor_collider = ColliderDesc::new(sensor_geom)
@@ -140,13 +144,13 @@ impl Physics {
     }
 
     #[export]
-    fn add_sensor(&mut self, owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
+    fn add_sensor(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> usize {
         let rb = RigidBodyDesc::new().status(BodyStatus::Kinematic).
             mass(1.0).
             angular_inertia(0.0).
             rotation(0.0).
             local_center_of_mass(Point2::new(0.0, 0.0)).
-            translation(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor)).build();
+            translation(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR)).build();
 
         let body_handle = self.bodies.insert(rb);
         let sensor_geom = ShapeHandle::new(self.convert_polygon2(polygon));
@@ -159,7 +163,7 @@ impl Physics {
     }
 
     #[export]
-    fn get_contacting_colliders(&mut self, owner: &Node, collider_index: usize) -> Vec<usize> {
+    fn get_contacting_colliders(&mut self, _owner: &Node, collider_index: usize) -> Vec<usize> {
         let mut collider_indices = Vec::new();
         for stuff in self.geometrical_world.colliders_in_proximity_of(&self.colliders, DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap() {
             let (handle, collider) = stuff;
@@ -180,78 +184,78 @@ impl Physics {
     //}
 
     #[export]
-    fn apply_force(&mut self, owner: &Node, force: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
+    fn apply_force(&mut self, _owner: &Node, force: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
         let body = self.bodies.get_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.apply_force(0, &Force2::new(Vector2::new(force.x, force.y), angular_force), ForceType::Force, true);
     }
 
     #[export]
-    fn set_velocity(&mut self, owner: &Node, velocity: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
+    fn set_velocity(&mut self, _owner: &Node, velocity: gdnative::core_types::Vector2, angular_force: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_velocity(Velocity2::new(Vector2::new(velocity.x, velocity.y), angular_force));
     }
 
     #[export]
-    fn get_velocity(&mut self, owner: &Node, index: usize) -> gdnative::core_types::Vector2 {
+    fn get_velocity(&mut self, _owner: &Node, index: usize) -> gdnative::core_types::Vector2 {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         return gdnative::core_types::Vector2::new(body.velocity().linear.x, body.velocity().linear.y);
     }
 
     #[export]
-    fn get_angular_velocity(&mut self, owner: &Node, index: usize) -> f32 {
+    fn get_angular_velocity(&mut self, _owner: &Node, index: usize) -> f32 {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         return body.velocity().angular;
     }
 
     #[export]
-    fn set_angular_velocity(&mut self, owner: &Node, index: usize, angular_velocity: f32) {
+    fn set_angular_velocity(&mut self, _owner: &Node, index: usize, angular_velocity: f32) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         return body.set_angular_velocity(angular_velocity);
     }
 
     #[export]
-    fn set_position(&mut self, owner: &Node, position: gdnative::core_types::Vector2, angle: f32, index: usize) {
+    fn set_position(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, angle: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
-        body.set_position(Isometry2::new(Vector2::new(position.x * self.sim_scaling_factor, position.y * self.sim_scaling_factor), angle));
+        body.set_position(Isometry2::new(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR), angle));
     }
 
     #[export]
-    fn get_position(&mut self, owner: &Node, index: usize) -> gdnative::core_types::Vector2 {
+    fn get_position(&mut self, _owner: &Node, index: usize) -> gdnative::core_types::Vector2 {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
-        return gdnative::core_types::Vector2::new(body.position().translation.x / self.sim_scaling_factor, body.position().translation.y / self.sim_scaling_factor);
+        return gdnative::core_types::Vector2::new(body.position().translation.x / SIM_SCALING_FACTOR, body.position().translation.y / SIM_SCALING_FACTOR);
     }
 
     #[export]
-    fn get_rotation(&mut self, owner: &Node, index: usize) -> f32 {
+    fn get_rotation(&mut self, _owner: &Node, index: usize) -> f32 {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         return body.position().rotation.angle();
     }
 
     #[export]
-    fn set_mass(&mut self, owner: &Node, mass: f32, index: usize) {
+    fn set_mass(&mut self, _owner: &Node, mass: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_mass(mass);
     }
 
     #[export]
-    fn set_angular_damping(&mut self, owner: &Node, angular_damping: f32, index: usize) {
+    fn set_angular_damping(&mut self, _owner: &Node, angular_damping: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_angular_damping(angular_damping);
     }
 
     #[export]
-    fn set_angular_inertia(&mut self, owner: &Node, angular_inertia: f32, index: usize) {
+    fn set_angular_inertia(&mut self, _owner: &Node, angular_inertia: f32, index: usize) {
         let body = self.bodies.rigid_body_mut(DefaultBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_angular_inertia(angular_inertia);
     }
 
     #[export]
-    fn add_liquid(&mut self, owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) -> gdnative::core_types::Vector2 {
-        let mut points = self.convert_to_points(droplets);
+    fn add_liquid(&mut self, _owner: &Node, droplets: gdnative::core_types::Vector2Array, velocities: gdnative::core_types::Vector2Array) -> gdnative::core_types::Vector2 {
+        let mut points = conversion::convert_to_points(droplets, SIM_SCALING_FACTOR);
 
         let viscosity = ArtificialViscosity::new(0.5, 0.0);
         let mut fluid = Fluid::new(points, self.particle_rad, 1.0);
-        fluid.velocities = self.convert_to_vec_of_vectors(velocities);
+        fluid.velocities = conversion::convert_to_vec_of_vectors(velocities);
         fluid.nonpressure_forces.push(Box::new(viscosity.clone()));
         let fluid_handle: FluidHandle = self.liquid_world.add_fluid(fluid);
         let idx: ContiguousArenaIndex = fluid_handle.into();
@@ -260,33 +264,58 @@ impl Physics {
     }
 
     #[export]
-    fn remove_liquid(&mut self, owner: &Node, liquid_index: gdnative::core_types::Vector2) {
+    fn remove_liquid(&mut self, _owner: &Node, liquid_index: gdnative::core_types::Vector2) {
         let fluid_handle = self.get_liquid_handle(liquid_index);
         self.liquid_world.remove_fluid(fluid_handle);
     }
 
-    fn convert_to_vec_of_vectors(&mut self, vector: gdnative::core_types::Vector2Array) -> Vec<Vector2<f32>> {
-        let mut rust_vec = Vec::new();
-        for value in vector.read().iter() {
-            rust_vec.push(Vector2::new(value.x, value.y));
-        }
-        return rust_vec;
-    }
-
     #[export]
-    fn get_liquid(&mut self, owner: &Node) -> Vector2Array {
+    fn get_liquid(&mut self, _owner: &Node) -> Vector2Array {
         let mut droplets = Vector2Array::new();
         for (i, fluid) in self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
-                droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
+                droplets.push(gdnative::core_types::Vector2::new(droplet.x / SIM_SCALING_FACTOR, droplet.y / SIM_SCALING_FACTOR));
             }
         }
         return droplets;
     }
 
     #[export]
-    fn get_liquid_raster(&mut self, owner: &Node, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32, meta_ball_influence: i64) -> Ref<gdnative::api::Image, Unique> {
+    fn move_particles(&mut self, _owner: &Node, fluid_index: gdnative::core_types::Vector2, particles_indices: Vec<usize>, new_positions: Vector2Array, new_velocities: Vector2Array) {
+        let mut fluid = self.get_mutable_liquid_by_index(fluid_index);
 
+        let mut positions = vec![Point2::new(0., 0.); new_positions.len() as usize];
+        let mut velocities = vec![Vector2::new(0., 0.); new_positions.len() as usize];
+        for particle_index in particles_indices {
+            let position = positions.get(particle_index).unwrap();
+            let velocity = velocities.get(particle_index).unwrap();
+            positions[particle_index] = Point2::new(position.x, position.y);
+            velocities[particle_index] = Vector2::new(velocity.x, velocity.y);
+            fluid.delete_particle_at_next_timestep(particle_index as usize);
+        }
+        fluid.add_particles(&positions[..], Some(&velocities[..]));
+    }
+
+    #[export]
+    fn remove_particles(&mut self, _owner: &Node, fluid_index: gdnative::core_types::Vector2, collider_index: usize) {
+        let particle_indices = self.get_contacting_liquid_indices(_owner, collider_index);
+        let mut fluid = self.get_mutable_liquid_by_index(fluid_index);
+
+        for particle_index in particle_indices {
+            fluid.delete_particle_at_next_timestep(particle_index as usize);
+        }
+    }
+
+    #[export]
+    fn add_particles(&mut self, _owner: &Node, fluid_index: gdnative::core_types::Vector2, new_positions: Vector2Array, new_velocities: Vector2Array) {
+        let mut fluid = self.get_mutable_liquid_by_index(fluid_index);
+        let positions = conversion::convert_to_points(new_positions, SIM_SCALING_FACTOR);
+        let velocities = conversion::convert_to_vec_of_vectors(new_velocities);
+        fluid.add_particles(&positions[..], Some(&velocities[..]));
+    }
+
+    #[export]
+    fn get_liquid_raster(&mut self, _owner: &Node, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32, meta_ball_influence: i64) -> Ref<gdnative::api::Image, Unique> {
         let rgba8 = 5;
         let width = ((x_max - x_min) / resolution + 1.0).ceil() as i64;
         let height = ((y_max - y_min) / resolution + 1.0).ceil() as i64;
@@ -297,20 +326,20 @@ impl Physics {
         image.lock();
         image.fill(gdnative::core_types::Color::rgba(0., 0.0, 0.0, 0.0));
         image.unlock();
-        let scaled_x_min = x_min * self.sim_scaling_factor;
-        let scaled_x_max = x_max * self.sim_scaling_factor;
-        let scaled_y_min = y_min * self.sim_scaling_factor;
-        let scaled_y_max = y_max * self.sim_scaling_factor;
+        let scaled_x_min = x_min * SIM_SCALING_FACTOR;
+        let scaled_x_max = x_max * SIM_SCALING_FACTOR;
+        let scaled_y_min = y_min * SIM_SCALING_FACTOR;
+        let scaled_y_max = y_max * SIM_SCALING_FACTOR;
 
         for (i, fluid) in self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 if droplet.x >= scaled_x_min && droplet.x <= scaled_x_max && droplet.y >= scaled_y_min && droplet.y <= scaled_y_max {
-                    let true_x = (droplet.x / self.sim_scaling_factor - x_min) / resolution;
+                    let true_x = (droplet.x / SIM_SCALING_FACTOR - x_min) / resolution;
                     let x = true_x.round() as i64;
                     let x_start = cmp::max(0, x - meta_ball_influence);
                     let x_end = cmp::min(width, x + meta_ball_influence);
 
-                    let true_y = ((droplet.y / self.sim_scaling_factor - y_min) / resolution);
+                    let true_y = ((droplet.y / SIM_SCALING_FACTOR - y_min) / resolution);
                     let y = true_y.round() as i64;
                     let y_start = cmp::max(0, y - meta_ball_influence);
                     let y_end = cmp::min(height, y + meta_ball_influence);
@@ -340,7 +369,7 @@ impl Physics {
     }
 
     #[export]
-    fn get_liquid_as_polygons(&mut self, owner: &Node) -> Vec<Vector2Array> {
+    fn get_liquid_as_polygons(&mut self, _owner: &Node) -> Vec<Vector2Array> {
         //let droplets = self.get_liquid(owner);
 
         let res = 0.2;
@@ -396,8 +425,8 @@ impl Physics {
                             for point in poly {
                                 poly_result.push(
                                     gdnative::core_types::Vector2::new(
-                                        (point[0] as f32 * res + min_x) / self.sim_scaling_factor,
-                                        (point[1] as f32 * res + min_y) / self.sim_scaling_factor,
+                                        (point[0] as f32 * res + min_x) / SIM_SCALING_FACTOR,
+                                        (point[1] as f32 * res + min_y) / SIM_SCALING_FACTOR,
                                     )
                                 );
                             }
@@ -411,7 +440,7 @@ impl Physics {
     }
 
     #[export]
-    fn get_liquid_velocities(&mut self, owner: &Node, liquid_index: gdnative::core_types::Vector2) -> Vector2Array {
+    fn get_liquid_velocities(&mut self, _owner: &Node, liquid_index: gdnative::core_types::Vector2) -> Vector2Array {
         let mut droplets = Vector2Array::new();
         for droplet in &self.get_liquid_by_index(liquid_index).velocities {
             droplets.push(gdnative::core_types::Vector2::new(droplet.x, droplet.y));
@@ -420,28 +449,33 @@ impl Physics {
     }
 
     #[export]
-    fn get_all_liquid_velocities(&mut self, owner: &Node) -> Vector2Array {
+    fn get_all_liquid_velocities(&mut self, _owner: &Node) -> Vector2Array {
         let mut velocities = Vector2Array::new();
         for (i, fluid) in self.liquid_world.fluids().iter() {
             for velocity in &fluid.velocities {
-                velocities.push(gdnative::core_types::Vector2::new(velocity.x / self.sim_scaling_factor, velocity.y / self.sim_scaling_factor));
+                velocities.push(gdnative::core_types::Vector2::new(velocity.x / SIM_SCALING_FACTOR, velocity.y / SIM_SCALING_FACTOR));
             }
         }
         return velocities;
     }
 
-    fn get_liquid_by_index(&mut self, liquid_index: gdnative::core_types::Vector2) -> &Fluid<f32> {
+    fn get_liquid_by_index(&self, liquid_index: gdnative::core_types::Vector2) -> &Fluid<f32> {
         let fluid_handle = self.get_liquid_handle(liquid_index);
         return self.liquid_world.fluids().get(fluid_handle).unwrap();
     }
 
-    fn get_liquid_handle(&mut self, liquid_index: gdnative::core_types::Vector2) -> FluidHandle {
+    fn get_mutable_liquid_by_index(&mut self, liquid_index: gdnative::core_types::Vector2) -> &mut Fluid<f32> {
+        let fluid_handle = self.get_liquid_handle(liquid_index);
+        return self.liquid_world.fluids_mut().get_mut(fluid_handle).unwrap();
+    }
+
+    fn get_liquid_handle(&self, liquid_index: gdnative::core_types::Vector2) -> FluidHandle {
         let index = ContiguousArenaIndex::from_raw_parts(liquid_index.x as usize, liquid_index.y as u64);
         return FluidHandle::from(index);
     }
 
     #[export]
-    fn get_contacting_liquids(&mut self, owner: &Node, collider_index: usize) -> Vector2Array {
+    fn get_contacting_liquids(&mut self, _owner: &Node, collider_index: usize) -> Vector2Array {
         let mut droplets = Vector2Array::new();
         let mut collider = self.colliders.get(DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
         let mut shape = collider.shape();
@@ -450,7 +484,7 @@ impl Physics {
         for (i, fluid) in self.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 if shape.contains_point(isometry, droplet) {
-                    droplets.push(gdnative::core_types::Vector2::new(droplet.x / self.sim_scaling_factor, droplet.y / self.sim_scaling_factor));
+                    droplets.push(gdnative::core_types::Vector2::new(droplet.x / SIM_SCALING_FACTOR, droplet.y / SIM_SCALING_FACTOR));
                 }
             }
         }
@@ -458,35 +492,46 @@ impl Physics {
     }
 
     #[export]
-    fn get_polygons(&mut self, owner: &Node) -> Vector3Array {
+    fn get_contacting_liquid_indices(&mut self, _owner: &Node, collider_index: usize) -> Vec<usize> {
+        let mut droplet_indices = Vec::new();
+        let mut collider = self.colliders.get(DefaultColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
+        let mut shape = collider.shape();
+        let isometry = collider.position();
+
+        for (i, fluid) in self.liquid_world.fluids().iter() {
+            let mut droplet_index = 0;
+            for droplet in &fluid.positions {
+                if shape.contains_point(isometry, droplet) {
+                    droplet_indices.push(droplet_index);
+                }
+                droplet_index += 1;
+            }
+        }
+        return droplet_indices;
+    }
+
+    #[export]
+    fn get_polygons(&mut self, _owner: &Node) -> Vector3Array {
         let mut polygons = Vector3Array::new();
         for (i, polygon) in self.colliders.iter() {
             let position: &Isometry2<f32> = polygon.position();
-            polygons.push(Vector3::new(position.translation.x / self.sim_scaling_factor, position.translation.y / self.sim_scaling_factor, position.rotation.angle()))
+            polygons.push(Vector3::new(position.translation.x / SIM_SCALING_FACTOR, position.translation.y / SIM_SCALING_FACTOR, position.rotation.angle()))
         }
         return polygons;
     }
 
-    fn convert_polygon(&mut self, polygon: gdnative::core_types::Vector2Array) -> Polyline<f32> {
-        let mut points = self.convert_to_points(polygon);
+    fn convert_polygon(&self, polygon: gdnative::core_types::Vector2Array) -> Polyline<f32> {
+        let mut points = conversion::convert_to_points(polygon, SIM_SCALING_FACTOR);
         return Polyline::new(points, None);
     }
 
-    fn convert_to_points(&mut self, godot_vector: gdnative::core_types::Vector2Array) -> Vec<Point2<f32>> {
-        let mut points = Vec::new();
-        for point in godot_vector.read().iter() {
-            points.push(Point2::new(point.x * self.sim_scaling_factor, point.y * self.sim_scaling_factor));
-        }
-        return points;
-    }
-
-    fn convert_polygon2(&mut self, polygon: gdnative::core_types::Vector2Array) -> ConvexPolygon<f32> {
-        let mut points = self.convert_to_points(polygon);
+    fn convert_polygon2(&self, polygon: gdnative::core_types::Vector2Array) -> ConvexPolygon<f32> {
+        let mut points = conversion::convert_to_points(polygon, SIM_SCALING_FACTOR);
         return ConvexPolygon::try_from_points(&points).unwrap();
     }
 
     #[export]
-    fn _process(&mut self, owner: &Node, delta: f32) {
+    fn _process(&mut self, _owner: &Node, delta: f32) {
         self.mechanical_world.step(
             &mut self.geometrical_world,
             &mut self.bodies,
