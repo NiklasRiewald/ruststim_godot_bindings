@@ -2,28 +2,23 @@ extern crate nalgebra as na;
 
 use gdnative::prelude::*;
 
-use na::{Point2, Vector2, Isometry2, Point};
-use salva2d::object::{Fluid, Boundary, BoundaryHandle, FluidHandle, ContiguousArenaIndex, FluidSet};
-use salva2d::solver::{ArtificialViscosity, IISPHSolver};
-use salva2d::LiquidWorld;
+use na::{Point2, Vector2, Isometry2};
+use salva2d::object::{Fluid, Boundary, FluidHandle, ContiguousArenaIndex};
+use salva2d::solver::ArtificialViscosity;
 use std::cmp;
-use std::convert::TryInto;
-use rapier2d::geometry::{ColliderSet, ColliderBuilder, ColliderHandle, Collider, InteractionGroups, BroadPhase, NarrowPhase};
-use rapier2d::dynamics::{RigidBodyType, RigidBodySet, RigidBodyHandle, RigidBody, MassProperties, IntegrationParameters, IslandManager, JointSet, CCDSolver};
-use rapier2d::dynamics::RigidBodyBuilder;
-use salva2d::integrations::rapier::{FluidsPipeline, ColliderSampling};
-use rapier2d::pipeline::{QueryPipeline, PhysicsPipeline, EventHandler, PhysicsHooks};
-use rapier2d::na::proptest::vector;
+use salva2d::integrations::rapier::{FluidsPipeline, ColliderSampling, ColliderCouplingSet};
+use salva2d::rapier::dynamics::{RigidBodySet, IslandManager, IntegrationParameters, JointSet, CCDSolver, RigidBodyType, CoefficientCombineRule, RigidBodyHandle, RigidBodyBuilder, RigidBody};
+use salva2d::rapier::geometry::{ColliderSet, BroadPhase, NarrowPhase, ColliderBuilder, ColliderHandle, Collider, InteractionGroups};
+use salva2d::rapier::pipeline::{PhysicsPipeline, QueryPipeline};
+use salva2d::rapier::prelude::vector;
+use parry2d::na::Matrix;
 
 
 mod conversion;
 
 
 const SIM_SCALING_FACTOR: f32 = 0.02;
-const GRAVITY: Vec<f32> = vector![0.0, -9.81];
-const INTEGRATION_PARAMETERS: IntegrationParameters = IntegrationParameters::default();
-const PHYSICS_HOOK: PhysicsHooks<RigidBodySet, ColliderSet> = ();
-const EVENT_HANDLER: dyn EventHandler = ();
+const PARTICLE_RAD: f32 = 0.1;
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -38,13 +33,11 @@ struct Physics {
     ccd_solver: CCDSolver,
     query_pipeline: QueryPipeline,
     fluids_pipeline: FluidsPipeline,
-    particle_rad: f32,
 }
 
 #[methods]
 impl Physics {
     fn new(_owner: &Node) -> Self {
-        let rad = 5.0 * SIM_SCALING_FACTOR;
         Physics {
             bodies: RigidBodySet::new(),
             colliders: ColliderSet::new(),
@@ -55,24 +48,21 @@ impl Physics {
             joint_set: JointSet::new(),
             ccd_solver: CCDSolver::new(),
             query_pipeline: QueryPipeline::new(),
-            fluids_pipeline: FluidsPipeline::new(rad, 2.0),
-            particle_rad: rad,
+            fluids_pipeline: FluidsPipeline::new(PARTICLE_RAD, 2.0),
         }
     }
 
     #[export]
-    fn add_rigid_body(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, restitution: f32, friction: f32, body_status: i32) -> Vec<usize> {
+    fn add_rigid_body(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, restitution: f32, friction: f32, body_status: i32) -> Vec<u32> {
         let mut status = RigidBodyType::Dynamic;
         if body_status == 1 {
             status = RigidBodyType::Static;
         } else if body_status == 2 {
-            status = RigidBodyType::Kinematic;
+            status = RigidBodyType::KinematicPositionBased;
         }
         let rb = RigidBodyBuilder::new(status).
             additional_mass(mass).
-            angular_inertia(0.0).
             rotation(0.0).
-            local_center_of_mass(Point2::new(0.0, 0.0)).
             translation(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR)).build();
 
         let rb_handle = self.bodies.insert(rb);
@@ -81,12 +71,15 @@ impl Physics {
         let collider = ColliderBuilder::convex_polyline(
             conversion::convert_to_points(polygon, SIM_SCALING_FACTOR)
         )
+            .unwrap()
             .density(density)
-            .material(MaterialHandle::new(BasicMaterial::new(restitution, friction)))
-            .build(RigidBodyHandle(rb_handle, 0));
-        let geom_sample = salva2d::sampling::shape_surface_ray_sample(collider.shape(), self.particle_rad).unwrap();
+            .restitution(restitution)
+            .restitution_combine_rule(CoefficientCombineRule::Min)
+            .friction(friction)
+            .build();
+        let geom_sample = salva2d::sampling::shape_surface_ray_sample(collider.shape(), PARTICLE_RAD).unwrap();
 
-        let co_handle = self.colliders.insert(co);
+        let co_handle = self.colliders.insert_with_parent(collider, rb_handle, &mut self.bodies);
         let bo_handle = self.fluids_pipeline.liquid_world.add_boundary(Boundary::new(Vec::new()));
         self.fluids_pipeline.coupling.register_coupling(
             bo_handle,
@@ -102,23 +95,25 @@ impl Physics {
     }
 
     #[export]
-    fn deactivate_rigid_body(&mut self, _owner: &Node, index: u32) {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
-        body.deactivate();
-        body.set_status(BodyStatus::Disabled);
+    //changed to require collider_index instead of rigid body index
+    fn deactivate_rigid_body(&mut self, _owner: &Node, collider_index: u32) {
+        let collider_handle = ColliderHandle::from_raw_parts(collider_index, 0);
+        let collider = self.colliders.get_mut(collider_handle).unwrap();
+        collider.set_collision_groups(InteractionGroups::none());
     }
 
     #[export]
-    fn activate_rigid_body(&mut self, _owner: &Node, index: u32) {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
-        body.activate();
-        body.set_status(RigidBodyType::Dynamic);
+    //changed to require collider_index instead of rigid body index
+    fn activate_rigid_body(&mut self, _owner: &Node, collider_index: u32) {
+        let collider_handle = ColliderHandle::from_raw_parts(collider_index, 0);
+        let collider = self.colliders.get_mut(collider_handle).unwrap();
+        collider.set_collision_groups(InteractionGroups::all());
     }
 
     #[export]
     fn deactivate_liquid_coupling(&mut self, _owner: &Node, collider_index: u32) {
         let boundary_handle = self.fluids_pipeline.coupling.unregister_coupling(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
-        self.liquid_world.remove_boundary(boundary_handle);
+        self.fluids_pipeline.liquid_world.remove_boundary(boundary_handle);
     }
 
     #[export]
@@ -126,7 +121,7 @@ impl Physics {
         let bo_handle = self.fluids_pipeline.liquid_world.add_boundary(Boundary::new(Vec::new()));
         self.fluids_pipeline.coupling.register_coupling(
             bo_handle,
-            RigidBodyHandlee::from_raw_parts(collider_index, 0),
+            ColliderHandle::from_raw_parts(collider_index, 0),
             ColliderSampling::DynamicContactSampling,
         );
     }
@@ -137,6 +132,7 @@ impl Physics {
         let sensor_collider = ColliderBuilder::convex_polyline(
             conversion::convert_to_points(polygon, SIM_SCALING_FACTOR)
         )
+            .unwrap()
             .sensor(true)
             .build();
         let collider_handle = self.colliders.insert_with_parent(sensor_collider, body_handle, &mut self.bodies);
@@ -146,16 +142,16 @@ impl Physics {
 
     #[export]
     fn add_sensor(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> u32 {
-        let rb = RigidBodyBuilder::new(RigidBodyType::Kinematic).
-            angular_inertia(0.0).
+        let rb = RigidBodyBuilder::new(RigidBodyType::KinematicPositionBased).
+            //angular_inertia(0.0).
             rotation(0.0).
-            local_center_of_mass(Point2::new(0.0, 0.0)).
             translation(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR)).build();
 
         let body_handle = self.bodies.insert(rb);
         let sensor_collider = ColliderBuilder::convex_polyline(
             conversion::convert_to_points(polygon, SIM_SCALING_FACTOR)
         )
+            .unwrap()
             .sensor(true)
             .build();
         let collider_handle = self.colliders.insert_with_parent(sensor_collider, body_handle, &mut self.bodies);
@@ -166,21 +162,24 @@ impl Physics {
     #[export]
     fn get_contacting_colliders(&mut self, _owner: &Node, collider_index: u32) -> Vec<u32> {
         let mut collider_indices = Vec::new();
-        let collider = (ColliderHandle::from_raw_parts(collider_index, 0) as Collider);
-        for stuff in self.query_pipeline.intersections_with_shape(
+        let collider_handle = (ColliderHandle::from_raw_parts(collider_index, 0));
+        let collider = self.colliders.get(collider_handle).unwrap();
+        self.query_pipeline.intersections_with_shape(
             &self.colliders,
             collider.position(),
             collider.shape(),
             InteractionGroups::all(),
             None,
-            None
-        ).unwrap() {
-            let (handle, collider) = stuff;
-            if self.bodies.get_mut(collider.body()).unwrap().status() != RigidBodyType::Disabled && !collider.is_sensor() {
-                let (index, generation) = handle.into_raw_parts();
-                collider_indices.push(index);
-            }
-        }
+            |handle|
+                {
+                    let coll = &self.colliders.get(handle).unwrap();
+                    if !coll.is_sensor() {
+                        let (index, generation) = handle.into_raw_parts();
+                        collider_indices.push(index);
+                    }
+                    true
+                }
+        );
         return collider_indices;
     }
 
@@ -193,62 +192,56 @@ impl Physics {
 
     #[export]
     fn set_velocity(&mut self, _owner: &Node, velocity: gdnative::core_types::Vector2, angular_force: f32, index: u32) {
-        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
+        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_linvel(Vector2::new(velocity.x, velocity.y), true);
-        body.set_angvel(angular_force);
+        body.set_angvel(angular_force, true);
     }
 
     #[export]
     fn get_velocity(&mut self, _owner: &Node, index: u32) -> gdnative::core_types::Vector2 {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
+        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         return gdnative::core_types::Vector2::new(body.linvel().x, body.linvel().y);
     }
 
     #[export]
     fn get_angular_velocity(&mut self, _owner: &Node, index: u32) -> f32 {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
+        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         return body.angvel();
     }
 
     #[export]
     fn set_angular_velocity(&mut self, _owner: &Node, index: u32, angular_velocity: f32) {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
-        return body.set_angular_velocity(angular_velocity);
+        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
+        return body.set_angvel(angular_velocity, true);
     }
 
     #[export]
     fn set_position(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, angle: f32, index: u32) {
-        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
+        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_position(Isometry2::new(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR), angle), true);
     }
 
     #[export]
     fn get_position(&mut self, _owner: &Node, index: u32) -> gdnative::core_types::Vector2 {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
+        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         return gdnative::core_types::Vector2::new(body.position().translation.x / SIM_SCALING_FACTOR, body.position().translation.y / SIM_SCALING_FACTOR);
     }
 
     #[export]
     fn get_rotation(&mut self, _owner: &Node, index: u32) -> f32 {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
+        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         return body.position().rotation.angle();
     }
 
     #[export]
-    fn set_mass(&mut self, _owner: &Node, mass: f32, index: u32) {
-        let body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap() as RigidBody;
-        body.mass_properties().set_mass(mass, false);
-    }
-
-    #[export]
     fn set_angular_damping(&mut self, _owner: &Node, angular_damping: f32, index: u32) {
-        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap()  as RigidBody;
+        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_angular_damping(angular_damping);
     }
 
     #[export]
     fn set_angular_inertia(&mut self, _owner: &Node, angular_inertia: f32, index: u32) {
-        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap()  as RigidBody;
+        let mut body = self.bodies.get_mut(RigidBodyHandle::from_raw_parts(index, 0)).unwrap();
         body.set_angular_damping(angular_inertia);
     }
 
@@ -264,7 +257,7 @@ impl Physics {
         let mut points = conversion::convert_to_points(droplets, SIM_SCALING_FACTOR);
 
         let viscosity = ArtificialViscosity::new(fluid_viscosity_coefficent, boundary_viscosity_coefficient);
-        let mut fluid = Fluid::new(points, &self.particle_rad, 1.0);
+        let mut fluid = Fluid::new(points, PARTICLE_RAD, 1.0);
         fluid.velocities = conversion::convert_to_vec_of_vectors(velocities);
         fluid.nonpressure_forces.push(Box::new(viscosity.clone()));
         let fluid_handle: FluidHandle = self.fluids_pipeline.liquid_world.add_fluid(fluid);
@@ -291,7 +284,7 @@ impl Physics {
     }
 
     #[export]
-    fn remove_particles(&mut self, _owner: &Node, fluid_index: gdnative::core_types::Vector2, collider_index: usize) {
+    fn remove_particles(&mut self, _owner: &Node, fluid_index: gdnative::core_types::Vector2, collider_index: u32) {
         let particle_indices = self.get_contacting_liquid_indices(_owner, collider_index);
         let mut fluid = self.get_mutable_liquid_by_index(fluid_index);
 
@@ -325,7 +318,7 @@ impl Physics {
         let scaled_y_min = y_min * SIM_SCALING_FACTOR;
         let scaled_y_max = y_max * SIM_SCALING_FACTOR;
 
-        for (i, fluid) in self.liquid_world.fluids().iter() {
+        for (i, fluid) in self.fluids_pipeline.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 if droplet.x >= scaled_x_min && droplet.x <= scaled_x_max && droplet.y >= scaled_y_min && droplet.y <= scaled_y_max {
                     let true_x = (droplet.x / SIM_SCALING_FACTOR - x_min) / resolution;
@@ -374,7 +367,7 @@ impl Physics {
     #[export]
     fn get_all_liquid_velocities(&mut self, _owner: &Node) -> Vector2Array {
         let mut velocities = Vector2Array::new();
-        for (i, fluid) in self.liquid_world.fluids().iter() {
+        for (i, fluid) in self.fluids_pipeline.liquid_world.fluids().iter() {
             for velocity in &fluid.velocities {
                 velocities.push(gdnative::core_types::Vector2::new(velocity.x / SIM_SCALING_FACTOR, velocity.y / SIM_SCALING_FACTOR));
             }
@@ -400,7 +393,7 @@ impl Physics {
     #[export]
     fn get_contacting_liquids(&mut self, _owner: &Node, collider_index: u32) -> Vector2Array {
         let mut droplets = Vector2Array::new();
-        let mut collider = self.colliders.get(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap() as Collider;
+        let mut collider = self.colliders.get(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
         let mut shape = collider.shape();
         let isometry = collider.position();
 
@@ -417,7 +410,7 @@ impl Physics {
     #[export]
     fn get_contacting_liquid_indices(&mut self, _owner: &Node, collider_index: u32) -> Vec<u32> {
         let mut droplet_indices = Vec::new();
-        let mut collider = self.colliders.get(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap() as Collider;
+        let mut collider = self.colliders.get(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
         let mut shape = collider.shape();
         let isometry = collider.position();
 
@@ -446,8 +439,8 @@ impl Physics {
     #[export]
     fn _process(&mut self, _owner: &Node, delta: f32) {
         self.physics_pipeline.step(
-            GRAVITY,
-            &INTEGRATION_PARAMETERS,
+            &vector![0.0, 9.81],
+            &IntegrationParameters::default(),
             &mut self.island_manager,
             &mut self.broad_phase,
             &mut self.narrow_phase,
@@ -455,17 +448,14 @@ impl Physics {
             &mut self.colliders,
             &mut self.joint_set,
             &mut self.ccd_solver,
-            PHYSICS_HOOK,
-            EVENT_HANDLER
+            &(),
+            &(),
         );
 
-
-        let dt = self.physics_pipeline.timestep();
         self.fluids_pipeline.liquid_world.step_with_coupling(
-            INTEGRATION_PARAMETERS.dt,
-            GRAVITY,
-            &mut self.fluids_pipeline.coupling.as_manager_mut(&self.colliders, &self.bodies)
-                .as_manager_mut(&self.colliders, &mut self.bodies),
+            1./60.,
+            &vector![0.0, 9.81],
+            &mut self.fluids_pipeline.coupling.as_manager_mut(&mut self.colliders, &mut self.bodies),
         );
     }
 }
