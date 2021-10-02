@@ -53,7 +53,16 @@ impl Physics {
     }
 
     #[export]
-    fn add_rigid_body(&mut self, _owner: &Node, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array, mass: f32, density: f32, restitution: f32, friction: f32, body_status: i32) -> Vec<u32> {
+    fn add_rigid_body(
+        &mut self,
+        _owner: &Node,
+        position: gdnative::core_types::Vector2,
+        polygon: gdnative::core_types::Vector2Array,
+        density: f32,
+        restitution: f32,
+        friction: f32,
+        body_status: i32
+    ) -> Vec<u32> {
         let mut status = RigidBodyType::Dynamic;
         if body_status == 1 {
             status = RigidBodyType::Static;
@@ -61,9 +70,10 @@ impl Physics {
             status = RigidBodyType::KinematicPositionBased;
         }
         let rb = RigidBodyBuilder::new(status).
-            additional_mass(mass).
             rotation(0.0).
-            translation(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR)).build();
+            translation(Vector2::new(position.x * SIM_SCALING_FACTOR, position.y * SIM_SCALING_FACTOR)).
+            ccd_enabled(body_status == 0).
+            build();
 
         let rb_handle = self.bodies.insert(rb);
 
@@ -95,7 +105,6 @@ impl Physics {
     }
 
     #[export]
-    //changed to require collider_index instead of rigid body index
     fn deactivate_rigid_body(&mut self, _owner: &Node, collider_index: u32) {
         let collider_handle = ColliderHandle::from_raw_parts(collider_index, 0);
         let collider = self.colliders.get_mut(collider_handle).unwrap();
@@ -103,7 +112,6 @@ impl Physics {
     }
 
     #[export]
-    //changed to require collider_index instead of rigid body index
     fn activate_rigid_body(&mut self, _owner: &Node, collider_index: u32) {
         let collider_handle = ColliderHandle::from_raw_parts(collider_index, 0);
         let collider = self.colliders.get_mut(collider_handle).unwrap();
@@ -164,6 +172,9 @@ impl Physics {
         let mut collider_indices = Vec::new();
         let collider_handle = (ColliderHandle::from_raw_parts(collider_index, 0));
         let collider = self.colliders.get(collider_handle).unwrap();
+        if collider.collision_groups() == InteractionGroups::none() {
+            return collider_indices;
+        }
         self.query_pipeline.intersections_with_shape(
             &self.colliders,
             collider.position(),
@@ -394,6 +405,9 @@ impl Physics {
     fn get_contacting_liquids(&mut self, _owner: &Node, collider_index: u32) -> Vector2Array {
         let mut droplets = Vector2Array::new();
         let mut collider = self.colliders.get(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
+        if collider.collision_groups() == InteractionGroups::none() {
+            return droplets;
+        }
         let mut shape = collider.shape();
         let isometry = collider.position();
 
@@ -411,6 +425,9 @@ impl Physics {
     fn get_contacting_liquid_indices(&mut self, _owner: &Node, collider_index: u32) -> Vec<u32> {
         let mut droplet_indices = Vec::new();
         let mut collider = self.colliders.get(ColliderHandle::from_raw_parts(collider_index, 0)).unwrap();
+        if collider.collision_groups() == InteractionGroups::none() {
+            return droplet_indices;
+        }
         let mut shape = collider.shape();
         let isometry = collider.position();
 
@@ -438,6 +455,12 @@ impl Physics {
 
     #[export]
     fn _process(&mut self, _owner: &Node, delta: f32) {
+        self.fluids_pipeline.liquid_world.step_with_coupling(
+            1./60.,
+            &vector![0.0, 9.81],
+            &mut self.fluids_pipeline.coupling.as_manager_mut(&mut self.colliders, &mut self.bodies),
+        );
+
         self.physics_pipeline.step(
             &vector![0.0, 9.81],
             &IntegrationParameters::default(),
@@ -451,12 +474,7 @@ impl Physics {
             &(),
             &(),
         );
-
-        self.fluids_pipeline.liquid_world.step_with_coupling(
-            1./60.,
-            &vector![0.0, 9.81],
-            &mut self.fluids_pipeline.coupling.as_manager_mut(&mut self.colliders, &mut self.bodies),
-        );
+        self.query_pipeline.update(&self.island_manager, &self.bodies, &self.colliders);
     }
 }
 
