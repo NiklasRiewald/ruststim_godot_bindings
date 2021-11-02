@@ -67,7 +67,7 @@ impl Physics {
         if body_status == 1 {
             status = RigidBodyType::Static;
         } else if body_status == 2 {
-            status = RigidBodyType::KinematicPositionBased;
+            status = RigidBodyType::KinematicVelocityBased;
         }
         let rb = RigidBodyBuilder::new(status).
             rotation(0.0).
@@ -137,10 +137,21 @@ impl Physics {
     #[export]
     fn add_sensor_to_body(&mut self, _owner: &Node, body_index: u32, position: gdnative::core_types::Vector2, polygon: gdnative::core_types::Vector2Array) -> u32 {
         let body_handle = RigidBodyHandle::from_raw_parts(body_index, 0);
+        let body = self.bodies.get_mut(body_handle).unwrap();
+        let body_translation = body.position().translation;
         let sensor_collider = ColliderBuilder::convex_polyline(
             conversion::convert_to_points(polygon, SIM_SCALING_FACTOR)
         )
             .unwrap()
+            .position(
+                Isometry2::new(
+                    Vector2::new(
+                        position.x * SIM_SCALING_FACTOR - body_translation.x,
+                        position.y * SIM_SCALING_FACTOR - body_translation.y
+                    ),
+                    0.0
+                )
+            )
             .sensor(true)
             .build();
         let collider_handle = self.colliders.insert_with_parent(sensor_collider, body_handle, &mut self.bodies);
