@@ -3,15 +3,17 @@ extern crate nalgebra as na;
 use gdnative::prelude::*;
 
 use na::{Point2, Vector2, Isometry2};
-use salva2d::object::{Fluid, Boundary, FluidHandle, ContiguousArenaIndex};
+use salva2d::object::{Fluid, Boundary, FluidHandle, ContiguousArenaIndex, ParticleId};
 use salva2d::solver::ArtificialViscosity;
 use std::cmp;
+use std::detect::__is_feature_detected::sha;
 use salva2d::integrations::rapier::{FluidsPipeline, ColliderSampling, ColliderCouplingSet};
 use salva2d::rapier::dynamics::{RigidBodySet, IslandManager, IntegrationParameters, JointSet, CCDSolver, RigidBodyType, CoefficientCombineRule, RigidBodyHandle, RigidBodyBuilder, RigidBody};
 use salva2d::rapier::geometry::{ColliderSet, BroadPhase, NarrowPhase, ColliderBuilder, ColliderHandle, Collider, InteractionGroups};
 use salva2d::rapier::pipeline::{PhysicsPipeline, QueryPipeline};
 use salva2d::rapier::prelude::vector;
 use parry2d::na::Matrix;
+use salva2d::geometry::HGridEntry;
 
 
 mod conversion;
@@ -61,7 +63,7 @@ impl Physics {
         density: f32,
         restitution: f32,
         friction: f32,
-        body_status: i32,
+        body_status: i32
     ) -> Vec<gdnative::core_types::Vector2> {
         let mut status = RigidBodyType::Dynamic;
         if body_status == 1 {
@@ -482,16 +484,14 @@ impl Physics {
         let mut shape = collider.shape();
         let isometry = collider.position();
 
-        for (i, fluid) in self.fluids_pipeline.liquid_world.fluids().iter() {
-            let mut droplet_index = 0;
-            for droplet in &fluid.positions {
-                if shape.contains_point(isometry, droplet) {
-                    droplet_indices.push(droplet_index);
-                }
-                droplet_index += 1;
+        return self.fluids_pipeline.liquid_world.particles_intersecting_shape(isometry, shape).filter_map(move |entry| match entry {
+            ParticleId::FluidParticle(fid, pid) => {
+                Some(pid as u32)
             }
-        }
-        return droplet_indices;
+            ParticleId::BoundaryParticle(bid, pid) => {
+                Some(pid as u32)
+            }
+        }).collect()
     }
 
     #[export]
