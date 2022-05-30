@@ -63,7 +63,7 @@ impl Physics {
         density: f32,
         restitution: f32,
         friction: f32,
-        body_status: i32
+        body_status: i32,
     ) -> Vec<gdnative::core_types::Vector2> {
         let mut status = RigidBodyType::Dynamic;
         if body_status == 1 {
@@ -120,7 +120,7 @@ impl Physics {
             body_handle,
             &mut self.island_manager,
             &mut self.colliders,
-            &mut self.joint_set
+            &mut self.joint_set,
         );
     }
 
@@ -398,7 +398,7 @@ impl Physics {
                         0.0,
                         0.0,
                         0.0,
-                        data[x_i as usize][y_i as usize]
+                        data[x_i as usize][y_i as usize],
                     ),
                 );
             }
@@ -491,15 +491,19 @@ impl Physics {
             ParticleId::BoundaryParticle(bid, pid) => {
                 Some(pid as u32)
             }
-        }).collect()
+        }).collect();
     }
 
     #[export]
-    fn get_polygons(&mut self, _owner: &Node) -> Vector3Array {
-        let mut polygons = Vector3Array::new();
-        for (i, polygon) in self.colliders.iter() {
+    fn get_polygons(&mut self, _owner: &Node) -> Dictionary<Unique> {
+        let mut polygons = Dictionary::new();
+        for (handle, polygon) in self.colliders.iter() {
             let position: &Isometry2<f32> = polygon.position();
-            polygons.push(Vector3::new(position.translation.x / SIM_SCALING_FACTOR, position.translation.y / SIM_SCALING_FACTOR, position.rotation.angle()))
+            let (collider_index, generation) = handle.into_raw_parts();
+            polygons.insert(
+                collider_index.to_string() + "_" + &generation.to_string(),
+                Vector3::new(position.translation.x / SIM_SCALING_FACTOR, position.translation.y / SIM_SCALING_FACTOR, position.rotation.angle()),
+            )
         }
         return polygons;
     }
