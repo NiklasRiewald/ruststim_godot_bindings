@@ -1,21 +1,21 @@
 [package]
 name = "nphysics_godot_bindings"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["nriewald <niklas.riewald@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 Inflector  = "0.11"
-parry2d = "0.6"
-rapier2d = { version = "0.10", features = [ "simd-stable", "default-sets"] }
-gdnative = "0.9.0-preview.0"
+parry2d = "0.15.1"
+rapier2d = { version = "0.20.0", features = [ "simd-stable"] }
+godot = { git = "https://github.com/godot-rust/gdext", branch = "master"}
 
 [dependencies.salva2d]
-version = "0.7.0"
+version = "0.9.0"
 features = ["rapier", "sampling", "parallel"]
 
 [dependencies.nalgebra]
-version = "0.29"
+version = "0.32.6"
 features = ["proptest-support"]
 
 
