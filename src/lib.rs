@@ -2,17 +2,18 @@ extern crate nalgebra as na;
 
 use godot::prelude::*;
 
-use na::{Point2, Vector2, Isometry2};
+use na::{Vector2, Isometry2};
 use salva2d::object::{Fluid, Boundary, FluidHandle, ContiguousArenaIndex, ParticleId};
 use salva2d::solver::ArtificialViscosity;
 use std::cmp;
-use salva2d::integrations::rapier::{FluidsPipeline, ColliderSampling, ColliderCouplingSet};
-use salva2d::rapier::dynamics::{RigidBodySet, IslandManager, IntegrationParameters, CCDSolver, RigidBodyType, CoefficientCombineRule, RigidBodyHandle, RigidBodyBuilder, RigidBody, ImpulseJointSet, MultibodyJointSet};
-use salva2d::rapier::geometry::{ColliderSet, BroadPhase, NarrowPhase, ColliderBuilder, ColliderHandle, Collider, InteractionGroups};
-use salva2d::rapier::pipeline::{PhysicsPipeline, QueryPipeline};
+use godot::classes::Image;
+use godot::classes::image::Format;
+use salva2d::integrations::rapier::{FluidsPipeline, ColliderSampling};
+use salva2d::rapier::dynamics::{RigidBodySet, IslandManager, IntegrationParameters, CCDSolver, RigidBodyType, CoefficientCombineRule, RigidBodyHandle, RigidBodyBuilder, ImpulseJointSet, MultibodyJointSet};
+use salva2d::rapier::geometry::{ColliderSet, BroadPhase, NarrowPhase, ColliderBuilder, ColliderHandle, InteractionGroups};
+use salva2d::rapier::pipeline::{PhysicsPipeline, QueryFilter, QueryPipeline};
 use salva2d::rapier::prelude::vector;
-use parry2d::na::Matrix;
-use salva2d::geometry::HGridEntry;
+
 
 
 mod conversion;
@@ -26,11 +27,11 @@ unsafe impl ExtensionLibrary for DimforgeGodotLibrary {}
 const SIM_SCALING_FACTOR: f32 = 0.02;
 const PARTICLE_RAD: f32 = 0.1;
 
-use godot::engine::Node;
+use godot::classes::Node2D;
 
 #[derive(GodotClass)]
-#[class(base=Node)]
-struct Physics {
+#[class(no_init)]
+struct RustPhysics {
     bodies: RigidBodySet,
     colliders: ColliderSet,
     physics_pipeline: PhysicsPipeline,
@@ -45,9 +46,10 @@ struct Physics {
 }
 
 #[godot_api]
-impl Physics {
-    fn new() -> Self {
-        Physics {
+impl RustPhysics {
+
+    fn create() -> Self {
+        Self {
             bodies: RigidBodySet::new(),
             colliders: ColliderSet::new(),
             physics_pipeline: PhysicsPipeline::new(),
@@ -202,7 +204,7 @@ impl Physics {
     #[func]
     fn get_contacting_colliders(&mut self, collider_index: godot::builtin::Vector2) -> VariantArray {
         let mut collider_indices = VariantArray::new();
-        let collider_handle = (ColliderHandle::from_raw_parts(collider_index.x as u32, collider_index.y as u32));
+        let collider_handle = ColliderHandle::from_raw_parts(collider_index.x as u32, collider_index.y as u32);
         let collider = self.colliders.get(collider_handle).unwrap();
         if collider.collision_groups() == InteractionGroups::none() {
             return collider_indices;
@@ -212,14 +214,13 @@ impl Physics {
             &self.colliders,
             collider.position(),
             collider.shape(),
-            InteractionGroups::all(),
-            None,
+            QueryFilter::default(),
             |handle|
                 {
                     let coll = &self.colliders.get(handle).unwrap();
                     if !coll.is_sensor() {
                         let (index, generation) = handle.into_raw_parts();
-                        collider_indices.push(godot::builtin::Vector2::new(index as f32, generation as f32));
+                        collider_indices.push(Variant::from(godot::builtin::Vector2::new(index as f32, generation as f32)));
                     }
                     true
                 },
@@ -347,25 +348,21 @@ impl Physics {
     }
 
     #[func]
-    fn get_liquid_raster(&mut self, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32, meta_ball_influence: i64) -> Ref<gdnative::api::Image, Unique> {
-        let rgba8 = 5;
+    fn get_liquid_raster(&mut self, x_min: f32, x_max: f32, y_min: f32, y_max: f32, resolution: f32, meta_ball_influence: i64) -> Gd < Image > {
         let width = ((x_max - x_min) / resolution + 1.0).ceil() as i64;
         let height = ((y_max - y_min) / resolution + 1.0).ceil() as i64;
         let mut data = vec![vec![0.0f32; height as usize]; width as usize];
         //let mut velocities = vec![vec![0.0f32; height as usize]; width as usize];
 
-        let mut image = gdnative::api::Image::new();
-        image.create(width, height, false, rgba8);
-        image.lock();
-        image.fill(gdnative::core_types::Color::rgba(0., 0.0, 0.0, 0.0));
-        image.unlock();
+
+        let mut image = Image::create(width as i32, height as i32, false, Format::RGBA8).unwrap();
+        image.fill(Color::from_rgba(0., 0.0, 0.0, 0.0));
         let scaled_x_min = x_min * SIM_SCALING_FACTOR;
         let scaled_x_max = x_max * SIM_SCALING_FACTOR;
         let scaled_y_min = y_min * SIM_SCALING_FACTOR;
         let scaled_y_max = y_max * SIM_SCALING_FACTOR;
 
-        for (i, fluid) in self.fluids_pipeline.liquid_world.fluids().iter() {
-            let mut pos = 0;
+        for (_i, fluid) in self.fluids_pipeline.liquid_world.fluids().iter() {
             for droplet in &fluid.positions {
                 if droplet.x >= scaled_x_min && droplet.x <= scaled_x_max && droplet.y >= scaled_y_min && droplet.y <= scaled_y_max {
                     let true_x = (droplet.x / SIM_SCALING_FACTOR - x_min) / resolution;
@@ -373,7 +370,7 @@ impl Physics {
                     let x_start = cmp::max(0, x - meta_ball_influence);
                     let x_end = cmp::min(width, x + meta_ball_influence);
 
-                    let true_y = ((droplet.y / SIM_SCALING_FACTOR - y_min) / resolution);
+                    let true_y = (droplet.y / SIM_SCALING_FACTOR - y_min) / resolution;
                     let y = true_y.round() as i64;
                     let y_start = cmp::max(0, y - meta_ball_influence);
                     let y_end = cmp::min(height, y + meta_ball_influence);
@@ -391,28 +388,25 @@ impl Physics {
                         }
                     }
                 }
-                pos += 1;
             }
         }
 
-        image.lock();
         for x_i in 0..width {
             for y_i in 0..height {
                 image.set_pixel(
-                    x_i,
-                    y_i,
+                    x_i as i32,
+                    y_i as i32,
                     Color::from_rgba(
                         //velocities[x_i as usize][y_i as usize],
-                        0.0,
-                        0.0,
-                        0.0,
+                        0.0 as f32,
+                        0.0 as f32,
+                        0.0 as f32,
                         data[x_i as usize][y_i as usize],
                     ),
                 );
             }
         }
 
-        image.unlock();
         return image;
     }
 
@@ -522,8 +516,7 @@ impl Physics {
         return polygons;
     }
 
-    #[func]
-    fn _process(&mut self, delta: f32) {
+    fn process(&mut self, delta: f64) {
         self.fluids_pipeline.liquid_world.step_with_coupling(
             1. / 60.,
             &vector![0.0, 9.81],
@@ -549,7 +542,3 @@ impl Physics {
     }
 }
 
-
-fn init(handle: InitHandle) {
-    handle.add_class::<Physics>();
-}
